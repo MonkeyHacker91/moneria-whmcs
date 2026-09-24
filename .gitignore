@@ -1,0 +1,13 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup and temporary directories
+backup_lang/
+scratch/
+*.tmp
+*.log
+
+# Environment & Sensitive files
+*.env
