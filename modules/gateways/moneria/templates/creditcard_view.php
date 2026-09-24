@@ -390,6 +390,7 @@ function gen3SubmitCreditCard(e) {
     var payload = {
         action: 'process_creditcard',
         invoiceid: <?php echo (int)$invoiceId; ?>,
+        token: <?php echo json_encode($cardToken ?? ''); ?>,
         number: number,
         name: name,
         document: doc,

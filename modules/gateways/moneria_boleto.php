@@ -165,10 +165,6 @@ function moneria_boleto_link(array $params): string
     $invoiceId = (int)$params['invoiceid'];
     $amount = number_format((float)$params['amount'], 2, '.', '');
     $systemUrl = rtrim($params['systemurl'], '/');
-    $assetsUrl = $systemUrl . '/modules/gateways/moneria/assets';
-    $checkUrl = $systemUrl . '/modules/gateways/callback/moneria.php?action=check_status';
-    $postBackUrl = $systemUrl . '/modules/gateways/callback/moneria.php';
-
     $clientId = $params['clientId'] ?? '';
     $clientSecret = $params['clientSecret'] ?? '';
     $baseUrl = !empty($params['environment']) ? $params['environment'] : 'https://api.moneria.com.br';
@@ -177,6 +173,10 @@ function moneria_boleto_link(array $params): string
     if (empty($clientId) || empty($clientSecret)) {
         return '<div class="alert alert-warning">Módulo Moneria Boleto não configurado com Client ID e Client Secret.</div>';
     }
+
+    $checkToken = hash_hmac('sha256', (string)$invoiceId, $clientSecret);
+    $checkUrl = $systemUrl . '/modules/gateways/callback/moneria.php?action=check_status&token=' . urlencode($checkToken);
+    $postBackUrl = $systemUrl . '/modules/gateways/callback/moneria.php';
 
     try {
         $client = new MoneriaClient($clientId, $clientSecret, $baseUrl, $debug);

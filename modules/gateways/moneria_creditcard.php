@@ -152,8 +152,11 @@ function moneria_creditcard_link(array $params): string
     $displayTitle = !empty($params['visibleName']) ? $params['visibleName'] : ($params['name'] ?? 'Cartão');
     $themeVars = MoneriaHelper::getThemeVariables($params);
 
+    $cardToken = hash_hmac('sha256', 'cc_invoice_' . $invoiceId, $clientSecret);
+
     $templateData = [
         'invoiceId'        => $invoiceId,
+        'cardToken'        => $cardToken,
         'displayTitle'     => $displayTitle,
         'themeStyle'       => $themeVars['themeStyle'],
         'themeVars'        => $themeVars,

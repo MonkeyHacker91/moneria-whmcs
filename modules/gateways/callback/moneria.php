@@ -84,7 +84,7 @@ if ($action === 'check_status') {
     }
 
     try {
-        $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['id', 'userid', 'status']);
+        $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['id', 'userid', 'status', 'paymentmethod']);
         if (!$invoice) {
             http_response_code(404);
             echo json_encode(['paid' => false, 'error' => 'Invoice not found']);
@@ -95,11 +95,19 @@ if ($action === 'check_status') {
         $userId = (int)($_SESSION['uid'] ?? 0);
         $adminId = (int)($_SESSION['adminid'] ?? 0);
         $secret = (string)($gatewayParams['clientSecret'] ?? '');
+        if (!empty($invoice->paymentmethod)) {
+            try {
+                $p = getGatewayVariables($invoice->paymentmethod);
+                if (!empty($p['clientSecret'])) {
+                    $secret = (string)$p['clientSecret'];
+                }
+            } catch (\Throwable $t) {}
+        }
         $expectedToken = !empty($secret) ? hash_hmac('sha256', (string)$invoiceId, $secret) : '';
 
         $isAuthorized = ($userId > 0 && (int)$invoice->userid === $userId)
             || ($adminId > 0)
-            || (!empty($token) && hash_equals($expectedToken, $token));
+            || (!empty($expectedToken) && !empty($token) && hash_equals($expectedToken, $token));
 
         if (!$isAuthorized) {
             http_response_code(403);
@@ -127,6 +135,7 @@ if ($action === 'process_creditcard') {
     header('Content-Type: application/json; charset=utf-8');
 
     $invoiceId = (int)($jsonBody['invoiceid'] ?? ($_POST['invoiceid'] ?? 0));
+    $cardToken = trim((string)($jsonBody['token'] ?? ($_POST['token'] ?? '')));
     $cardNumber = MoneriaHelper::onlyNumbers($jsonBody['number'] ?? ($_POST['number'] ?? ''));
     $holderName = trim($jsonBody['name'] ?? ($_POST['name'] ?? ''));
     $holderDoc = MoneriaHelper::onlyNumbers($jsonBody['document'] ?? ($_POST['document'] ?? ''));
@@ -147,7 +156,7 @@ if ($action === 'process_creditcard') {
             exit;
         }
 
-        // Security: User must be logged in as invoice owner, or admin
+        // Security 1: User must be logged in as invoice owner, or admin
         $userId = (int)($_SESSION['uid'] ?? 0);
         $adminId = (int)($_SESSION['adminid'] ?? 0);
 
@@ -160,6 +169,23 @@ if ($action === 'process_creditcard') {
         if ($userId > 0 && (int)$invoice->userid !== $userId && $adminId <= 0) {
             http_response_code(403);
             echo json_encode(['success' => false, 'error' => 'Você não tem permissão para realizar o pagamento desta fatura.']);
+            exit;
+        }
+
+        // Security 2: Strict HMAC CSRF Token verification
+        $secret = (string)($gatewayParams['clientSecret'] ?? '');
+        if (!empty($invoice->paymentmethod)) {
+            try {
+                $p = getGatewayVariables($invoice->paymentmethod);
+                if (!empty($p['clientSecret'])) {
+                    $secret = (string)$p['clientSecret'];
+                }
+            } catch (\Throwable $t) {}
+        }
+        $expectedCardToken = !empty($secret) ? hash_hmac('sha256', 'cc_invoice_' . $invoiceId, $secret) : '';
+        if (empty($expectedCardToken) || empty($cardToken) || !hash_equals($expectedCardToken, $cardToken)) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Token de segurança inválido ou expirado. Atualize a página e tente novamente.']);
             exit;
         }
 

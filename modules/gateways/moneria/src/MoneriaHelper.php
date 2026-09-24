@@ -640,6 +640,7 @@ class MoneriaHelper
     public static function findInvoiceIdByCharge(string $chargeId): ?int
     {
         try {
+            $chargeId = trim(preg_replace('/[^a-zA-Z0-9_\-\.]/', '', $chargeId));
             if (!class_exists('WHMCS\Database\Capsule') || empty($chargeId)) {
                 return null;
             }
