@@ -148,104 +148,16 @@ function moneria_pix_link(array $params): string
                 . '</div>';
         }
 
-        // Check if charge already exists in cache/database for this invoice
-        $existingCharge = MoneriaHelper::getInvoiceCharge($invoiceId);
-        $charge = null;
-
-        $rawInvDueDate = !empty($params['duedate']) ? MoneriaHelper::sanitizeDate($params['duedate']) : date('Y-m-d', strtotime('+3 days'));
-        $expectedDueDate = $rawInvDueDate;
-        if (strtotime($expectedDueDate) < strtotime(date('Y-m-d'))) {
-            $expectedDueDate = date('Y-m-d', strtotime('+1 day'));
-        }
-
-        if ($existingCharge && !empty($existingCharge['id'])) {
-            $charge = $existingCharge;
-            $rawExistingDueDate = $charge['dueDate'] ?? ($charge['invoices'][0]['dueDate'] ?? ($charge['invoices'][0]['due_date'] ?? null));
-            $existingDueDate = MoneriaHelper::sanitizeDate($rawExistingDueDate);
-            $existingAmount = (float)($charge['amount'] ?? ($charge['total'] ?? 0));
-            $existingStatus = strtoupper($charge['status'] ?? '');
-
-            $isStatusValid = !in_array($existingStatus, ['CANCELED', 'CANCELLED', 'EXPIRED', 'FAILED'], true);
-            $isDueDateMatch = (!empty($existingDueDate) && $existingDueDate === $expectedDueDate);
-            $isAmountMatch = ($existingAmount > 0 && abs($existingAmount - (float)$amount) < 0.01);
-
-            if (!$isStatusValid || !$isDueDateMatch || !$isAmountMatch) {
-                try {
-                    $client->cancelCharge($existingCharge['id']);
-                } catch (\Exception $e) {
-                    // Ignore
-                }
-                $charge = null; // Recreate charge
-            }
+        // Delegate to central MoneriaHelper (handles concurrency lock, duplicate prevention, and caching)
+        $charge = MoneriaHelper::generateChargeForInvoice($invoiceId, $params);
+        if (!$charge) {
+            $charge = MoneriaHelper::getInvoiceCharge($invoiceId);
         }
 
         if (!$charge) {
-            // Find or create Customer in Moneria
-            $clientDetails = $params['clientdetails'] ?? [];
-            $userId = $clientDetails['userid'] ?? ($clientDetails['id'] ?? 0);
-
-            if ((!$userId || empty($clientDetails['email'])) && class_exists('WHMCS\Database\Capsule')) {
-                $dbInvoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
-                if ($dbInvoice) {
-                    $dbClient = Capsule::table('tblclients')->where('id', $dbInvoice->userid)->first();
-                    if ($dbClient) {
-                        $clientDetails = (array)$dbClient;
-                    }
-                }
-            }
-
-            $address1 = trim($clientDetails['address1'] ?? '');
-            $address2 = trim($clientDetails['address2'] ?? '');
-            $streetNumber = MoneriaHelper::extractAddressNumber($address1);
-            if ($streetNumber !== 'S/N') {
-                $cleanStreet = trim(preg_replace('/,?\s*\b' . preg_quote($streetNumber, '/') . '\b\s*$/', '', $address1));
-                if (!empty($cleanStreet)) {
-                    $address1 = $cleanStreet;
-                }
-            }
-
-            $customerPayload = [
-                'name'     => trim(($clientDetails['firstname'] ?? '') . ' ' . ($clientDetails['lastname'] ?? '')),
-                'document' => $document,
-                'email'    => trim($clientDetails['email'] ?? ''),
-                'phone'    => $clientDetails['phonenumber'] ?? '',
-                'address'  => [
-                    'postalCode'   => $clientDetails['postcode'] ?? '',
-                    'street'       => $address1 ?: 'Rua Principal',
-                    'number'       => $streetNumber,
-                    'complement'   => '',
-                    'neighborhood' => $address2 ?: 'Centro',
-                    'city'         => trim($clientDetails['city'] ?? 'São Paulo'),
-                    'state'        => !empty($clientDetails['state']) ? strtoupper(substr(trim($clientDetails['state']), 0, 2)) : 'SP',
-                    'country'      => 'Brasil',
-                ],
-            ];
-
-            $moneriaCustomer = $client->findOrCreateCustomer($customerPayload);
-            $customerId = $moneriaCustomer['id'] ?? '';
-
-            if (empty($customerId)) {
-                throw new \Exception('Não foi possível sincronizar o cliente com a Moneria.');
-            }
-
-            $dueDate = $expectedDueDate;
-
-            $chargePayload = [
-                'customerId'     => $customerId,
-                'name'           => 'Fatura #' . $invoiceId,
-                'description'    => 'Pagamento PIX da Fatura #' . $invoiceId . ' - ' . ($params['companyname'] ?? 'WHMCS'),
-                'amount'         => $amount,
-                'paymentMethods' => ['PIX'],
-                'dueDate'        => $dueDate,
-                'postBackUrl'    => $postBackUrl,
-                'expirationDays' => (int)($params['expirationDays'] ?? 30),
-            ];
-
-            $charge = $client->createCharge($chargePayload);
-
-            if (!empty($charge['id'])) {
-                MoneriaHelper::saveInvoiceCharge($invoiceId, $charge);
-            }
+            return '<div class="alert alert-danger" style="margin: 15px 0;">'
+                . '<strong>Não foi possível gerar a cobrança Pix na Moneria.</strong> Por favor, tente novamente ou entre em contato com o suporte.'
+                . '</div>';
         }
 
         // Extract Pix data

@@ -433,13 +433,33 @@ $paidStatuses = ['PAID', 'APPROVED', 'CONFIRMED', 'RECEIVED', 'COMPLETED', 'SETT
 $verifiedLive = false;
 
 if (in_array($status, $paidStatuses, true)) {
-    if (!empty($chargeId)) {
+    $record = Capsule::table('mod_moneria_charges')->where('invoice_id', $invoiceId)->first();
+    $actualChargeId = !empty($record->charge_id) ? $record->charge_id : $chargeId;
+
+    if (!empty($actualChargeId)) {
         try {
             $client = MoneriaHelper::createClient($gatewayParams);
-            $liveCharge = $client->getCharge($chargeId);
+            $liveCharge = $client->getCharge($actualChargeId);
             $liveStatus = strtoupper($liveCharge['status'] ?? '');
 
-            if (in_array($liveStatus, $paidStatuses, true)) {
+            $paidTx = null;
+            if (!empty($liveCharge['invoices'][0]['transactions'])) {
+                foreach ($liveCharge['invoices'][0]['transactions'] as $txItem) {
+                    $txSt = strtoupper($txItem['status'] ?? '');
+                    if (in_array($txSt, $paidStatuses, true)) {
+                        $paidTx = $txItem;
+                        break;
+                    }
+                }
+            }
+
+            if ($paidTx) {
+                $transactionId = $paidTx['id'] ?? $transactionId;
+                $amount = (float)($paidTx['amount'] ?? $amount);
+                $fee = (float)($paidTx['totalFee'] ?? ($paidTx['fee'] ?? $fee));
+                $status = 'PAID';
+                $verifiedLive = true;
+            } elseif (in_array($liveStatus, $paidStatuses, true)) {
                 $status = 'PAID';
                 $verifiedLive = true;
                 $liveAmount = (float)($liveCharge['amount'] ?? ($liveCharge['total'] ?? 0));
@@ -450,7 +470,7 @@ if (in_array($status, $paidStatuses, true)) {
                 logTransaction($actualGateway, [
                     'webhook_payload' => $payload,
                     'live_charge' => $liveCharge,
-                ], "Webhook Rejected (Security): Charge #{$chargeId} status on Moneria API is '{$liveStatus}', not PAID.");
+                ], "Webhook Rejected (Security): Charge #{$actualChargeId} status on Moneria API is '{$liveStatus}', not PAID.");
 
                 header('Content-Type: application/json; charset=utf-8');
                 http_response_code(400);
@@ -461,7 +481,7 @@ if (in_array($status, $paidStatuses, true)) {
             logTransaction($actualGateway, [
                 'webhook_payload' => $payload,
                 'exception' => $t->getMessage(),
-            ], "Webhook Verification Failed (Security): Could not verify charge #{$chargeId} on Moneria API");
+            ], "Webhook Verification Failed (Security): Could not verify charge #{$actualChargeId} on Moneria API");
 
             header('Content-Type: application/json; charset=utf-8');
             http_response_code(400);
@@ -469,7 +489,7 @@ if (in_array($status, $paidStatuses, true)) {
             exit;
         }
     } else {
-        logTransaction($actualGateway, $payload, "Webhook Rejected (Security): No charge ID provided in payload");
+        logTransaction($actualGateway, $payload, "Webhook Rejected (Security): No charge ID found for invoice #{$invoiceId}");
         header('Content-Type: application/json; charset=utf-8');
         http_response_code(400);
         echo json_encode(['status' => 'rejected', 'error' => 'Missing charge ID']);

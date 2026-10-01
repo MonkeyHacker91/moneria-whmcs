@@ -923,6 +923,16 @@ class MoneriaHelper
             return null;
         }
 
+        // Concurrency lock: prevent race conditions when multiple hooks/requests fire within seconds
+        $lockKey = "moneria_gen_charge_" . $invoiceId;
+        $lockAcquired = false;
+        try {
+            $lockRes = Capsule::select("SELECT GET_LOCK(?, 15) as lck", [$lockKey]);
+            $lockAcquired = !empty($lockRes[0]->lck);
+        } catch (\Throwable $t) {
+            // Continue if database doesn't support GET_LOCK
+        }
+
         try {
             $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
             if (!$invoice || strcasecmp($invoice->status, 'Unpaid') !== 0) {
@@ -940,24 +950,21 @@ class MoneriaHelper
             // Check if charge already exists
             $existing = self::getInvoiceCharge($invoiceId);
             if ($existing && !empty($existing['id']) && !$force) {
-                $rawExistingDueDate = $existing['dueDate'] ?? ($existing['invoices'][0]['dueDate'] ?? ($existing['invoices'][0]['due_date'] ?? null));
-                $existingDueDate = self::sanitizeDate($rawExistingDueDate);
                 $existingAmount = (float)($existing['amount'] ?? ($existing['total'] ?? 0));
                 $existingStatus = strtoupper($existing['status'] ?? '');
 
                 $isStatusValid = !in_array($existingStatus, ['CANCELED', 'CANCELLED', 'EXPIRED', 'FAILED'], true);
-                $isDueDateMatch = (!empty($existingDueDate) && $existingDueDate === $expectedDueDate);
                 $isAmountMatch = ($existingAmount > 0 && abs($existingAmount - $expectedAmount) < 0.01);
 
-                if ($isStatusValid && $isDueDateMatch && $isAmountMatch) {
+                if ($isStatusValid && $isAmountMatch) {
                     return $existing;
                 }
 
-                // If due date or amount changed, cancel previous outdated charge on Moneria
+                // If amount changed or status is invalid, cancel previous outdated charge on Moneria before creating a new one
                 try {
                     $client = new MoneriaClient($clientId, $clientSecret, $baseUrl, $debug);
                     $client->cancelCharge($existing['id']);
-                } catch (\Exception $e) {
+                } catch (\Throwable $e) {
                     // Ignore cancellation failure on API
                 }
 
@@ -1029,8 +1036,15 @@ class MoneriaHelper
                 return null;
             }
 
-            $methodsConfig = $gatewayParams['paymentMethods'] ?? 'PIX_BOLETO';
-            $paymentMethods = ($methodsConfig === 'PIX_ONLY') ? ['PIX'] : (($methodsConfig === 'BOLETO_ONLY') ? ['BOLETO'] : ['PIX', 'BOLETO']);
+            $gwName = $gatewayParams['paymentmethod'] ?? ($invoice->paymentmethod ?? 'moneria');
+            if ($gwName === 'moneria_pix') {
+                $paymentMethods = ['PIX'];
+            } elseif ($gwName === 'moneria_boleto') {
+                $paymentMethods = ['BOLETO'];
+            } else {
+                $methodsConfig = $gatewayParams['paymentMethods'] ?? 'PIX_BOLETO';
+                $paymentMethods = ($methodsConfig === 'PIX_ONLY') ? ['PIX'] : (($methodsConfig === 'BOLETO_ONLY') ? ['BOLETO'] : ['PIX', 'BOLETO']);
+            }
 
             $systemUrl = rtrim(\WHMCS\Config\Setting::getValue('SystemURL') ?? '', '/');
             $postBackUrl = $systemUrl . '/modules/gateways/callback/moneria.php';
@@ -1040,10 +1054,14 @@ class MoneriaHelper
                 $dueDate = date('Y-m-d', strtotime('+1 day'));
             }
 
+            $companyName = Capsule::table('tblconfiguration')->where('setting', 'CompanyName')->value('value') ?? ($gatewayParams['companyname'] ?? '');
+            $companySuffix = !empty($companyName) ? ' - ' . trim($companyName) : '';
+            $description = 'Pagamento da Fatura #' . $invoiceId . $companySuffix;
+
             $chargePayload = [
                 'customerId'     => $customerId,
                 'name'           => 'Fatura #' . $invoiceId,
-                'description'    => 'Pagamento da Fatura #' . $invoiceId,
+                'description'    => $description,
                 'amount'         => number_format((float)$invoice->total, 2, '.', ''),
                 'paymentMethods' => $paymentMethods,
                 'dueDate'        => $dueDate,
@@ -1067,8 +1085,16 @@ class MoneriaHelper
                 self::saveInvoiceCharge($invoiceId, $charge);
                 return $charge;
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // Fail safely
+        } finally {
+            if ($lockAcquired) {
+                try {
+                    Capsule::select("SELECT RELEASE_LOCK(?)", [$lockKey]);
+                } catch (\Throwable $t) {
+                    // Ignore
+                }
+            }
         }
 
         return null;

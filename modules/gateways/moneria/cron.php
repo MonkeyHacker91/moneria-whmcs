@@ -67,12 +67,24 @@ foreach ($pendingCharges as $c) {
         $live = $client->getCharge($chargeId);
         $status = strtoupper($live['status'] ?? '');
         $invData = $live['invoices'][0] ?? [];
-        $tx = $invData['transactions'][0] ?? [];
+
+        $paidTx = null;
+        if (!empty($invData['transactions'])) {
+            foreach ($invData['transactions'] as $txItem) {
+                $tSt = strtoupper($txItem['status'] ?? '');
+                if (in_array($tSt, ['APPROVED', 'CONFIRMED', 'PAID', 'SETTLED', 'SUCCESS'])) {
+                    $paidTx = $txItem;
+                    break;
+                }
+            }
+        }
+
+        $tx = $paidTx ?: ($invData['transactions'][0] ?? []);
         $txStatus = strtoupper($tx['status'] ?? '');
         
         if ($status === 'CONFIRMED' || $status === 'PAID' || $txStatus === 'APPROVED' || $txStatus === 'CONFIRMED') {
             $paidAmount = (float)($invData['paidAmount'] ?? ($tx['amount'] ?? $c->total));
-            $fee = (float)($tx['totalFee'] ?? 1.99);
+            $fee = (float)($tx['totalFee'] ?? ($tx['fee'] ?? 0.89));
             $transId = $tx['id'] ?? $chargeId;
             
             // Mark paid in WHMCS
