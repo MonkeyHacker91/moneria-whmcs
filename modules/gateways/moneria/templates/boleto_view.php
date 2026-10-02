@@ -34,16 +34,16 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
     <?php else: ?>
         <div class="moneria-head gen3-boleto__head">
             <div class="moneria-brand gen3-boleto__brand">
-                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? 'Boleto'); ?></span>
+                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? \Moneria\Gateway\MoneriaHelper::trans('boleto')); ?></span>
                 <span class="moneria-amount" style="font-size: 1rem; font-weight: 700; color: var(--gb-text); margin-left: 4px;"><?php echo htmlspecialchars($amountFormatted); ?></span>
             </div>
             <div class="moneria-due gen3-boleto__due">
-                <span>Vencimento</span>
+                <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('due_date'); ?></span>
                 <strong><?php echo htmlspecialchars($dueDateFormatted); ?></strong>
             </div>
         </div>
 
-        <p class="moneria-lead gen3-boleto__lead">Use a linha digitável abaixo para pagar no app do seu banco:</p>
+        <p class="moneria-lead gen3-boleto__lead"><?php echo \Moneria\Gateway\MoneriaHelper::trans('boleto_lead'); ?></p>
 
         <?php if (!empty($boletoBarCode)): ?>
             <div class="moneria-code-group gen3-code-group">
@@ -53,12 +53,12 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
                     type="text"
                     readonly
                     value="<?php echo htmlspecialchars($boletoBarCode); ?>"
-                    aria-label="Linha digitável do boleto"
+                    aria-label="<?php echo htmlspecialchars(\Moneria\Gateway\MoneriaHelper::trans('boleto_barcode_aria')); ?>"
                     onclick="this.select();"
                 >
                 <button type="button" class="moneria-copy-btn gen3-copy-btn gen3-boleto__copy" onclick="moneriaPerformCopy('gen3-dedicated-bol-val', this)">
                     <i class="fas fa-copy" aria-hidden="true"></i>
-                    <span>Copiar</span>
+                    <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('copy'); ?></span>
                 </button>
             </div>
         <?php endif; ?>
@@ -67,11 +67,11 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
             <div class="moneria-note gen3-boleto__note" style="border-color: rgba(209, 180, 43, 0.3); background: rgba(209, 180, 43, 0.08); color: var(--gb-note-text);" role="note">
                 <i class="fas fa-bolt" style="color: var(--gb-accent);" aria-hidden="true"></i>
                 <div style="flex: 1;">
-                    <div style="font-weight: 700; color: var(--gb-text); margin-bottom: 4px;">PIX Integrado no Boleto</div>
+                    <div style="font-weight: 700; color: var(--gb-text); margin-bottom: 4px;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('boleto_integrated_pix'); ?></div>
                     <div class="moneria-code-group gen3-code-group" style="margin-bottom: 0; margin-top: 6px;">
                         <input class="moneria-code-input gen3-code-input gen3-boleto__code" id="gen3-bol-pix-val" type="text" readonly value="<?php echo htmlspecialchars($pixQrCode); ?>" style="height: 36px; line-height: 34px; font-size: 0.75rem !important;" />
                         <button type="button" class="moneria-copy-btn gen3-copy-btn gen3-boleto__copy" onclick="moneriaPerformCopy('gen3-bol-pix-val', this)" style="height: 36px; padding: 0 12px;">
-                            <span>Copiar Pix</span>
+                            <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('copy_pix'); ?></span>
                         </button>
                     </div>
                 </div>
@@ -80,13 +80,13 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
 
         <div class="moneria-note gen3-boleto__note" role="note">
             <i class="fas fa-info-circle" aria-hidden="true"></i>
-            <span>A compensação bancária pode levar até <strong>2 dias úteis</strong>.</span>
+            <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('boleto_note'); ?></span>
         </div>
 
         <?php if (!empty($boletoUrl)): ?>
             <a class="moneria-print-btn gen3-print-btn gen3-boleto__print" href="<?php echo htmlspecialchars($boletoUrl); ?>" target="_blank" rel="noopener noreferrer">
                 <i class="fas fa-receipt" aria-hidden="true"></i>
-                <span>Imprimir boleto (PDF)</span>
+                <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('print_boleto'); ?></span>
             </a>
         <?php endif; ?>
     <?php endif; ?>
@@ -378,19 +378,22 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
 </style>
 
 <script>
+window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations()); ?>;
+
 function moneriaPerformCopy(inputId, btn) {
     var input = document.getElementById(inputId);
     if (!input) return;
     var value = input.value || '';
+    var i18n = window.moneriaI18n || { copy: 'Copiar', copied: 'Copiado!' };
     
     function done() {
         if (!btn) return;
         btn.classList.add('is-copied');
         var span = btn.querySelector('span');
-        if (span) span.textContent = 'Copiado!';
+        if (span) span.textContent = i18n.copied || 'Copiado!';
         setTimeout(function () {
             btn.classList.remove('is-copied');
-            if (span) span.textContent = 'Copiar';
+            if (span) span.textContent = i18n.copy || 'Copiar';
         }, 1600);
     }
 

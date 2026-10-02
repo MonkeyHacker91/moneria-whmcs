@@ -1181,6 +1181,245 @@ class MoneriaHelper
     }
 
     /**
+     * Detects current active WHMCS language.
+     *
+     * @param array|null $params
+     * @return string Normalized language code ('portuguese-br', 'english', 'spanish')
+     */
+    public static function getCurrentLanguage(?array $params = null): string
+    {
+        $rawLang = '';
+
+        // 1. Check WHMCS session
+        if (!empty($_SESSION['Language'])) {
+            $rawLang = (string)$_SESSION['Language'];
+        } elseif (!empty($_SESSION['uid']) && class_exists('WHMCS\Database\Capsule')) {
+            try {
+                $rawLang = (string)Capsule::table('tblclients')->where('id', (int)$_SESSION['uid'])->value('language');
+            } catch (\Throwable $t) {}
+        }
+
+        // 2. Check gateway params client details
+        if (empty($rawLang) && !empty($params['clientdetails']['language'])) {
+            $rawLang = (string)$params['clientdetails']['language'];
+        }
+
+        // 3. Check cookie
+        if (empty($rawLang) && !empty($_COOKIE['WHMCSLanguage'])) {
+            $rawLang = (string)$_COOKIE['WHMCSLanguage'];
+        }
+
+        // 4. Check global WHMCS config
+        if (empty($rawLang) && class_exists('WHMCS\Config\Setting')) {
+            try {
+                $rawLang = (string)\WHMCS\Config\Setting::getValue('Language');
+            } catch (\Throwable $t) {}
+        }
+
+        $rawLang = strtolower(trim($rawLang));
+
+        if (strpos($rawLang, 'portuguese') !== false || strpos($rawLang, 'portugues') !== false || strpos($rawLang, 'pt') !== false || strpos($rawLang, 'br') !== false) {
+            return 'portuguese-br';
+        }
+
+        if (strpos($rawLang, 'span') !== false || strpos($rawLang, 'es') !== false) {
+            return 'spanish';
+        }
+
+        if (strpos($rawLang, 'eng') !== false || strpos($rawLang, 'en') !== false) {
+            return 'english';
+        }
+
+        return 'portuguese-br';
+    }
+
+    /**
+     * Complete multilingual translation dictionary.
+     *
+     * @return array
+     */
+    public static function getTranslations(): array
+    {
+        return [
+            'portuguese-br' => [
+                'pix_boleto' => 'PIX / Boleto',
+                'pix' => 'PIX',
+                'boleto' => 'Boleto Bancário',
+                'creditcard' => 'Cartão de Crédito',
+                'due_date' => 'Vencimento',
+                'status' => 'Status',
+                'status_instant' => 'Instantâneo',
+                'status_online' => 'Online',
+                'tab_pix' => 'PIX Instantâneo',
+                'tab_boleto' => 'Boleto Bancário',
+                'tab_creditcard' => 'Cartão de Crédito',
+                'scan_or_copy' => 'Escaneie o QR Code acima ou use a chave Copia e Cola:',
+                'pix_code_aria' => 'Código Pix Copia e Cola',
+                'boleto_barcode_aria' => 'Linha digitável do boleto',
+                'copy' => 'Copiar',
+                'copied' => 'Copiado!',
+                'copy_pix' => 'Copiar Pix',
+                'waiting_payment' => 'Aguardando pagamento... A baixa é instantânea.',
+                'boleto_lead' => 'Use a linha digitável abaixo para pagar no app do seu banco:',
+                'boleto_note' => 'A compensação bancária pode levar até <strong>2 dias úteis</strong>.',
+                'boleto_integrated_pix' => 'PIX Integrado no Boleto',
+                'print_boleto' => 'Imprimir boleto (PDF)',
+                'card_number' => 'Número do Cartão',
+                'card_holder_name' => 'Nome Impresso no Cartão',
+                'card_holder_placeholder' => 'NOME DO TITULAR',
+                'card_holder_doc' => 'CPF/CNPJ do Titular',
+                'card_expiry' => 'Validade',
+                'card_cvv' => 'CVV',
+                'card_installments' => 'Parcelamento',
+                'card_single_payment' => ' (à vista)',
+                'card_pay_button' => 'Pagar Agora',
+                'card_processing' => 'Processando...',
+                'card_success' => 'Pagamento aprovado com sucesso! Atualizando fatura...',
+                'card_invalid_num' => 'Informe um número de cartão válido.',
+                'card_invalid_doc' => 'Informe um CPF/CNPJ válido.',
+                'card_declined' => 'Transação não autorizada.',
+                'server_error' => 'Erro ao processar resposta do servidor.',
+                'conn_error' => 'Erro de conexão com o servidor.',
+                'doc_required' => '<strong>CPF/CNPJ obrigatório:</strong> Por favor, atualize seus dados cadastrais informando seu CPF ou CNPJ para gerar a cobrança via Moneria.',
+                'charge_error' => '<strong>Não foi possível gerar a cobrança na Moneria.</strong> Por favor, tente novamente ou entre em contato com o suporte.',
+            ],
+            'english' => [
+                'pix_boleto' => 'PIX / Bank Slip',
+                'pix' => 'PIX',
+                'boleto' => 'Bank Slip (Boleto)',
+                'creditcard' => 'Credit Card',
+                'due_date' => 'Due Date',
+                'status' => 'Status',
+                'status_instant' => 'Instant',
+                'status_online' => 'Online',
+                'tab_pix' => 'Instant PIX',
+                'tab_boleto' => 'Bank Slip (Boleto)',
+                'tab_creditcard' => 'Credit Card',
+                'scan_or_copy' => 'Scan the QR Code above or copy the PIX code below:',
+                'pix_code_aria' => 'PIX Copy-Paste Code',
+                'boleto_barcode_aria' => 'Bank Slip Digitable Line',
+                'copy' => 'Copy',
+                'copied' => 'Copied!',
+                'copy_pix' => 'Copy PIX',
+                'waiting_payment' => 'Waiting for payment... Confirmation is instantaneous.',
+                'boleto_lead' => 'Use the barcode number below to pay via your banking app:',
+                'boleto_note' => 'Bank slip clearing may take up to <strong>2 business days</strong>.',
+                'boleto_integrated_pix' => 'Integrated PIX on Bank Slip',
+                'print_boleto' => 'View / Print Bank Slip (PDF)',
+                'card_number' => 'Card Number',
+                'card_holder_name' => 'Cardholder Name',
+                'card_holder_placeholder' => 'CARDHOLDER NAME',
+                'card_holder_doc' => 'Cardholder Tax ID / CPF / CNPJ',
+                'card_expiry' => 'Expiration Date',
+                'card_cvv' => 'CVV',
+                'card_installments' => 'Installments',
+                'card_single_payment' => ' (single payment)',
+                'card_pay_button' => 'Pay Now',
+                'card_processing' => 'Processing...',
+                'card_success' => 'Payment approved successfully! Refreshing invoice...',
+                'card_invalid_num' => 'Please enter a valid credit card number.',
+                'card_invalid_doc' => 'Please enter a valid Tax ID / CPF / CNPJ.',
+                'card_declined' => 'Transaction not authorized.',
+                'server_error' => 'Error processing server response.',
+                'conn_error' => 'Server connection error.',
+                'doc_required' => '<strong>Tax ID / Document required:</strong> Please update your profile with your Tax ID / CPF / CNPJ to generate payment.',
+                'charge_error' => '<strong>Could not generate charge on Moneria.</strong> Please try again or contact support.',
+            ],
+            'spanish' => [
+                'pix_boleto' => 'PIX / Boleto Bancario',
+                'pix' => 'PIX',
+                'boleto' => 'Boleto Bancario',
+                'creditcard' => 'Tarjeta de Crédito',
+                'due_date' => 'Vencimiento',
+                'status' => 'Estado',
+                'status_instant' => 'Instantáneo',
+                'status_online' => 'En Línea',
+                'tab_pix' => 'PIX Instantáneo',
+                'tab_boleto' => 'Boleto Bancario',
+                'tab_creditcard' => 'Tarjeta de Crédito',
+                'scan_or_copy' => 'Escanee el código QR arriba o copie el código PIX abajo:',
+                'pix_code_aria' => 'Código PIX Copiar y Pegar',
+                'boleto_barcode_aria' => 'Línea digitable del boleto',
+                'copy' => 'Copiar',
+                'copied' => '¡Copiado!',
+                'copy_pix' => 'Copiar PIX',
+                'waiting_payment' => 'Esperando el pago... La confirmación es instantánea.',
+                'boleto_lead' => 'Use la línea digitable a continuación para pagar en la app de su banco:',
+                'boleto_note' => 'La compensación bancaria puede demorar hasta <strong>2 días hábiles</strong>.',
+                'boleto_integrated_pix' => 'PIX Integrado en el Boleto',
+                'print_boleto' => 'Imprimir boleto (PDF)',
+                'card_number' => 'Número de la Tarjeta',
+                'card_holder_name' => 'Nombre en la Tarjeta',
+                'card_holder_placeholder' => 'NOMBRE DEL TITULAR',
+                'card_holder_doc' => 'Documento / Identificación del Titular',
+                'card_expiry' => 'Vencimiento',
+                'card_cvv' => 'CVV',
+                'card_installments' => 'Cuotas',
+                'card_single_payment' => ' (un pago)',
+                'card_pay_button' => 'Pagar Ahora',
+                'card_processing' => 'Procesando...',
+                'card_success' => '¡Pago aprobado con éxito! Actualizando factura...',
+                'card_invalid_num' => 'Ingrese un número de tarjeta válido.',
+                'card_invalid_doc' => 'Ingrese un número de documento válido.',
+                'card_declined' => 'Transacción no autorizada.',
+                'server_error' => 'Error al procesar la respuesta del servidor.',
+                'conn_error' => 'Error de conexión con el servidor.',
+                'doc_required' => '<strong>Documento obligatorio:</strong> Por favor, actualice sus datos con su identificación fiscal / CPF / CNPJ para generar el pago.',
+                'charge_error' => '<strong>No fue posible generar el cobro en Moneria.</strong> Por favor, intente nuevamente o contacte a soporte.',
+            ],
+        ];
+    }
+
+    /**
+     * Translates a string key according to the active WHMCS language.
+     *
+     * @param string $key
+     * @param string|null $lang
+     * @return string
+     */
+    public static function trans(string $key, ?string $lang = null): string
+    {
+        global $_LANG;
+        if (!empty($_LANG['moneria_' . $key])) {
+            return (string)$_LANG['moneria_' . $key];
+        }
+
+        if (empty($lang)) {
+            $lang = self::getCurrentLanguage();
+        }
+
+        $all = self::getTranslations();
+        if (isset($all[$lang][$key])) {
+            return $all[$lang][$key];
+        }
+
+        if (isset($all['portuguese-br'][$key])) {
+            return $all['portuguese-br'][$key];
+        }
+
+        if (isset($all['english'][$key])) {
+            return $all['english'][$key];
+        }
+
+        return $key;
+    }
+
+    /**
+     * Returns key-value translation map for JavaScript injection.
+     *
+     * @param string|null $lang
+     * @return array
+     */
+    public static function getJsTranslations(?string $lang = null): array
+    {
+        if (empty($lang)) {
+            $lang = self::getCurrentLanguage();
+        }
+        $all = self::getTranslations();
+        return $all[$lang] ?? $all['portuguese-br'];
+    }
+
+    /**
      * Renders a PHP template file.
      *
      * @param string $templatePath

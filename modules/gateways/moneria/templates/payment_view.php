@@ -40,11 +40,11 @@ $initialTab = (!empty($defaultTab) && $defaultTab === 'boleto' && $hasBoleto) ? 
     <?php else: ?>
         <div class="moneria-head gen3-boleto__head">
             <div class="moneria-brand gen3-boleto__brand">
-                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? 'PIX / Boleto'); ?></span>
+                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? \Moneria\Gateway\MoneriaHelper::trans('pix_boleto')); ?></span>
                 <span class="moneria-amount" style="font-size: 1rem; font-weight: 700; color: var(--gb-text); margin-left: 4px;"><?php echo htmlspecialchars($amountFormatted); ?></span>
             </div>
             <div class="moneria-due gen3-boleto__due">
-                <span>Vencimento</span>
+                <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('due_date'); ?></span>
                 <strong><?php echo htmlspecialchars($dueDateFormatted); ?></strong>
             </div>
         </div>
@@ -53,11 +53,11 @@ $initialTab = (!empty($defaultTab) && $defaultTab === 'boleto' && $hasBoleto) ? 
             <div class="moneria-tab-switch gen3-tab-switch">
                 <button type="button" class="moneria-tab-btn gen3-tab-switch__btn <?php echo ($initialTab === 'pix' ? 'is-active' : ''); ?>" id="gen3-tab-pix" onclick="moneriaSwitchPaymentTab('pix')">
                     <i class="fas fa-bolt" aria-hidden="true"></i>
-                    <span>PIX Instantâneo</span>
+                    <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('tab_pix'); ?></span>
                 </button>
                 <button type="button" class="moneria-tab-btn gen3-tab-switch__btn <?php echo ($initialTab === 'boleto' ? 'is-active' : ''); ?>" id="gen3-tab-boleto" onclick="moneriaSwitchPaymentTab('boleto')">
                     <i class="fas fa-barcode" aria-hidden="true"></i>
-                    <span>Boleto Bancário</span>
+                    <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('tab_boleto'); ?></span>
                 </button>
             </div>
         <?php endif; ?>
@@ -79,7 +79,7 @@ $initialTab = (!empty($defaultTab) && $defaultTab === 'boleto' && $hasBoleto) ? 
                     </div>
                 <?php endif; ?>
 
-                <p class="moneria-lead gen3-boleto__lead">Escaneie o QR Code acima ou use a chave Copia e Cola:</p>
+                <p class="moneria-lead gen3-boleto__lead"><?php echo \Moneria\Gateway\MoneriaHelper::trans('scan_or_copy'); ?></p>
 
                 <?php if (!empty($pixQrCode)): ?>
                     <div class="moneria-code-group gen3-code-group">
@@ -89,19 +89,19 @@ $initialTab = (!empty($defaultTab) && $defaultTab === 'boleto' && $hasBoleto) ? 
                             type="text"
                             readonly
                             value="<?php echo htmlspecialchars($pixQrCode); ?>"
-                            aria-label="Código Pix Copia e Cola"
+                            aria-label="<?php echo htmlspecialchars(\Moneria\Gateway\MoneriaHelper::trans('pix_code_aria')); ?>"
                             onclick="this.select();"
                         >
                         <button type="button" class="moneria-copy-btn gen3-copy-btn gen3-boleto__copy" onclick="moneriaPerformCopy('gen3-pix-code-val', this)">
                             <i class="fas fa-copy" aria-hidden="true"></i>
-                            <span>Copiar</span>
+                            <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('copy'); ?></span>
                         </button>
                     </div>
                 <?php endif; ?>
 
                 <div class="moneria-status-line gen3-status-line">
                     <div class="moneria-status-spinner gen3-status-spinner"></div>
-                    <span>Aguardando pagamento... A baixa é instantânea.</span>
+                    <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('waiting_payment'); ?></span>
                 </div>
             </div>
         <?php endif; ?>
@@ -109,7 +109,7 @@ $initialTab = (!empty($defaultTab) && $defaultTab === 'boleto' && $hasBoleto) ? 
         <!-- BOLETO PANE -->
         <?php if ($hasBoleto): ?>
             <div id="gen3-pane-boleto" class="moneria-pane" style="display: <?php echo ($initialTab === 'boleto' ? 'block' : 'none'); ?>;">
-                <p class="moneria-lead gen3-boleto__lead">Use a linha digitável abaixo para pagar no app do seu banco:</p>
+                <p class="moneria-lead gen3-boleto__lead"><?php echo \Moneria\Gateway\MoneriaHelper::trans('boleto_lead'); ?></p>
 
                 <?php if (!empty($boletoBarCode)): ?>
                     <div class="moneria-code-group gen3-code-group">
@@ -119,25 +119,25 @@ $initialTab = (!empty($defaultTab) && $defaultTab === 'boleto' && $hasBoleto) ? 
                             type="text"
                             readonly
                             value="<?php echo htmlspecialchars($boletoBarCode); ?>"
-                            aria-label="Linha digitável do boleto"
+                            aria-label="<?php echo htmlspecialchars(\Moneria\Gateway\MoneriaHelper::trans('boleto_barcode_aria')); ?>"
                             onclick="this.select();"
                         >
                         <button type="button" class="moneria-copy-btn gen3-copy-btn gen3-boleto__copy" onclick="moneriaPerformCopy('gen3-bol-code-val', this)">
                             <i class="fas fa-copy" aria-hidden="true"></i>
-                            <span>Copiar</span>
+                            <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('copy'); ?></span>
                         </button>
                     </div>
                 <?php endif; ?>
 
                 <div class="moneria-note gen3-boleto__note" role="note">
                     <i class="fas fa-info-circle" aria-hidden="true"></i>
-                    <span>A compensação do boleto pode levar até <strong>2 dias úteis</strong>.</span>
+                    <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('boleto_note'); ?></span>
                 </div>
 
                 <?php if (!empty($boletoUrl)): ?>
                     <a class="moneria-print-btn gen3-print-btn gen3-boleto__print" href="<?php echo htmlspecialchars($boletoUrl); ?>" target="_blank" rel="noopener noreferrer">
                         <i class="fas fa-receipt" aria-hidden="true"></i>
-                        <span>Imprimir boleto (PDF)</span>
+                        <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('print_boleto'); ?></span>
                     </a>
                 <?php endif; ?>
             </div>
@@ -565,6 +565,8 @@ $initialTab = (!empty($defaultTab) && $defaultTab === 'boleto' && $hasBoleto) ? 
 </style>
 
 <script>
+window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations()); ?>;
+
 function moneriaSwitchPaymentTab(tab) {
     var pixPane = document.getElementById('gen3-pane-pix');
     var bolPane = document.getElementById('gen3-pane-boleto');
@@ -590,15 +592,16 @@ function moneriaPerformCopy(inputId, btn) {
     var input = document.getElementById(inputId);
     if (!input) return;
     var value = input.value || '';
+    var i18n = window.moneriaI18n || { copy: 'Copiar', copied: 'Copiado!' };
     
     function done() {
         if (!btn) return;
         btn.classList.add('is-copied');
         var span = btn.querySelector('span');
-        if (span) span.textContent = 'Copiado!';
+        if (span) span.textContent = i18n.copied || 'Copiado!';
         setTimeout(function () {
             btn.classList.remove('is-copied');
-            if (span) span.textContent = 'Copiar';
+            if (span) span.textContent = i18n.copy || 'Copiar';
         }, 1600);
     }
 

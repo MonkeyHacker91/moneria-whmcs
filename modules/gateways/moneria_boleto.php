@@ -184,7 +184,7 @@ function moneria_boleto_link(array $params): string
         $document = MoneriaHelper::extractDocument($params);
         if (empty($document)) {
             return '<div class="alert alert-warning" style="margin: 15px 0;">'
-                . '<strong>CPF/CNPJ obrigatório:</strong> Por favor, atualize seus dados cadastrais informando seu CPF ou CNPJ para emitir o Boleto Bancário.'
+                . MoneriaHelper::trans('doc_required')
                 . '</div>';
         }
 
@@ -196,7 +196,7 @@ function moneria_boleto_link(array $params): string
 
         if (!$charge) {
             return '<div class="alert alert-danger" style="margin: 15px 0;">'
-                . '<strong>Não foi possível emitir o Boleto Bancário na Moneria.</strong> Por favor, tente novamente ou entre em contato com o suporte.'
+                . MoneriaHelper::trans('charge_error')
                 . '</div>';
         }
 

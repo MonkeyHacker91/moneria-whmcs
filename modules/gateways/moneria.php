@@ -207,7 +207,7 @@ function moneria_link(array $params): string
         $document = MoneriaHelper::extractDocument($params);
         if (empty($document)) {
             return '<div class="alert alert-warning" style="margin: 15px 0;">'
-                . '<strong>CPF/CNPJ obrigatório:</strong> Por favor, atualize seus dados cadastrais informando seu CPF ou CNPJ para gerar a cobrança via Moneria.'
+                . MoneriaHelper::trans('doc_required')
                 . '</div>';
         }
 
@@ -219,7 +219,7 @@ function moneria_link(array $params): string
 
         if (!$charge) {
             return '<div class="alert alert-danger" style="margin: 15px 0;">'
-                . '<strong>Não foi possível gerar a cobrança na Moneria.</strong> Por favor, tente novamente ou entre em contato com o suporte.'
+                . MoneriaHelper::trans('charge_error')
                 . '</div>';
         }
 
@@ -265,6 +265,7 @@ function moneria_link(array $params): string
         $hasBoleto = ($methodsConfig !== 'PIX_ONLY') && (!empty($boletoBarCode) || !empty($boletoUrl));
 
         $themeVars = MoneriaHelper::getThemeVariables($params);
+        $displayTitle = !empty($params['visibleName']) ? $params['visibleName'] : ($params['name'] ?? MoneriaHelper::trans('pix_boleto'));
 
         $templateData = [
             'invoiceId'        => $invoiceId,

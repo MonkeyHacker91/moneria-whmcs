@@ -35,12 +35,12 @@ $currentYear = (int)date('Y');
     <?php else: ?>
         <div class="moneria-head gen3-boleto__head">
             <div class="moneria-brand gen3-boleto__brand">
-                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? 'Cartão'); ?></span>
+                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? \Moneria\Gateway\MoneriaHelper::trans('creditcard')); ?></span>
                 <span class="moneria-amount" style="font-size: 1rem; font-weight: 700; color: var(--gb-text); margin-left: 4px;"><?php echo htmlspecialchars($amountFormatted); ?></span>
             </div>
             <div class="moneria-due gen3-boleto__due">
-                <span>Status</span>
-                <strong style="color: #38bdf8;">Online</strong>
+                <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('status'); ?></span>
+                <strong style="color: #38bdf8;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('status_online'); ?></strong>
             </div>
         </div>
 
@@ -49,23 +49,23 @@ $currentYear = (int)date('Y');
 
         <form id="gen3-moneria-cc-form" onsubmit="return gen3SubmitCreditCard(event)">
             <div style="margin-bottom: 12px;">
-                <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;">Número do Cartão</label>
+                <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_number'); ?></label>
                 <input type="text" id="gen3_field_cc_num" class="moneria-code-input gen3-code-input gen3-boleto__code" style="width: 100%;" placeholder="0000 0000 0000 0000" maxlength="19" required />
             </div>
 
             <div style="margin-bottom: 12px;">
-                <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;">Nome Impresso no Cartão</label>
-                <input type="text" id="gen3_field_cc_name" class="moneria-code-input gen3-code-input gen3-boleto__code" style="width: 100%; text-transform: uppercase;" value="<?php echo htmlspecialchars($holderName); ?>" placeholder="NOME DO TITULAR" required />
+                <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_holder_name'); ?></label>
+                <input type="text" id="gen3_field_cc_name" class="moneria-code-input gen3-code-input gen3-boleto__code" style="width: 100%; text-transform: uppercase;" value="<?php echo htmlspecialchars($holderName); ?>" placeholder="<?php echo htmlspecialchars(\Moneria\Gateway\MoneriaHelper::trans('card_holder_placeholder')); ?>" required />
             </div>
 
             <div style="margin-bottom: 12px;">
-                <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;">CPF/CNPJ do Titular</label>
+                <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_holder_doc'); ?></label>
                 <input type="text" id="gen3_field_cc_doc" class="moneria-code-input gen3-code-input gen3-boleto__code" style="width: 100%;" value="<?php echo htmlspecialchars($holderDocument); ?>" placeholder="000.000.000-00" required />
             </div>
 
             <div style="display: flex; gap: 8px; margin-bottom: 12px;">
                 <div style="flex: 1;">
-                    <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;">Validade</label>
+                    <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_expiry'); ?></label>
                     <div style="display: flex; gap: 4px;">
                         <select id="gen3_field_cc_month" class="moneria-code-input gen3-code-input gen3-boleto__code" style="flex: 1; padding: 0 4px !important;">
                             <?php for ($m = 1; $m <= 12; $m++): ?>
@@ -81,20 +81,20 @@ $currentYear = (int)date('Y');
                 </div>
 
                 <div style="flex: 1;">
-                    <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;">CVV</label>
+                    <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_cvv'); ?></label>
                     <input type="password" id="gen3_field_cc_cvv" class="moneria-code-input gen3-code-input gen3-boleto__code" style="width: 100%;" placeholder="123" maxlength="4" required />
                 </div>
             </div>
 
             <?php if ($maxInstallments > 1): ?>
                 <div style="margin-bottom: 16px;">
-                    <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;">Parcelamento</label>
+                    <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_installments'); ?></label>
                     <select id="gen3_field_cc_installments" class="moneria-code-input gen3-code-input gen3-boleto__code" style="width: 100%;">
                         <?php for ($i = 1; $i <= $maxInstallments; $i++): 
                             $instVal = $amount / $i;
                         ?>
                             <option value="<?php echo $i; ?>">
-                                <?php echo $i . 'x de R$ ' . number_format($instVal, 2, ',', '.') . ($i === 1 ? ' (à vista)' : ''); ?>
+                                <?php echo $i . 'x R$ ' . number_format($instVal, 2, ',', '.') . ($i === 1 ? \Moneria\Gateway\MoneriaHelper::trans('card_single_payment') : ''); ?>
                             </option>
                         <?php endfor; ?>
                     </select>
@@ -105,7 +105,7 @@ $currentYear = (int)date('Y');
 
             <button type="submit" id="gen3_cc_submit_btn" class="moneria-print-btn gen3-print-btn gen3-boleto__print">
                 <i class="fas fa-lock" aria-hidden="true"></i>
-                <span>Pagar Agora (<?php echo htmlspecialchars($amountFormatted); ?>)</span>
+                <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_pay_button'); ?> (<?php echo htmlspecialchars($amountFormatted); ?>)</span>
             </button>
         </form>
     <?php endif; ?>
@@ -333,6 +333,8 @@ $currentYear = (int)date('Y');
 </style>
 
 <script>
+window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations()); ?>;
+
 var ccNumEl = document.getElementById('gen3_field_cc_num');
 if (ccNumEl) {
     ccNumEl.addEventListener('input', function(e) {
@@ -352,6 +354,7 @@ function gen3SubmitCreditCard(e) {
     var alertBox = document.getElementById('gen3-cc-alert-box');
     var successBox = document.getElementById('gen3-cc-success-box');
     var btn = document.getElementById('gen3_cc_submit_btn');
+    var i18n = window.moneriaI18n || {};
 
     if (alertBox) alertBox.style.display = 'none';
     if (successBox) successBox.style.display = 'none';
@@ -367,7 +370,7 @@ function gen3SubmitCreditCard(e) {
 
     if (number.length < 13) {
         if (alertBox) {
-            alertBox.textContent = 'Informe um número de cartão válido.';
+            alertBox.textContent = i18n.card_invalid_num || 'Informe um número de cartão válido.';
             alertBox.style.display = 'flex';
         }
         return false;
@@ -375,7 +378,7 @@ function gen3SubmitCreditCard(e) {
 
     if (doc.length < 11) {
         if (alertBox) {
-            alertBox.textContent = 'Informe um CPF/CNPJ válido.';
+            alertBox.textContent = i18n.card_invalid_doc || 'Informe um CPF/CNPJ válido.';
             alertBox.style.display = 'flex';
         }
         return false;
@@ -384,7 +387,7 @@ function gen3SubmitCreditCard(e) {
     var originalBtnHtml = btn ? btn.innerHTML : '';
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<span>Processando...</span>';
+        btn.innerHTML = '<span>' + (i18n.card_processing || 'Processando...') + '</span>';
     }
 
     var payload = {
@@ -414,12 +417,12 @@ function gen3SubmitCreditCard(e) {
             var res = JSON.parse(xhr.responseText);
             if (res && res.success === true) {
                 if (successBox) {
-                    successBox.textContent = 'Pagamento aprovado com sucesso! Atualizando fatura...';
+                    successBox.textContent = i18n.card_success || 'Pagamento aprovado com sucesso! Atualizando fatura...';
                     successBox.style.display = 'flex';
                 }
                 setTimeout(function() { window.location.reload(); }, 1200);
             } else {
-                var err = res.error || (res.message || 'Transação não autorizada.');
+                var err = res.error || (res.message || (i18n.card_declined || 'Transação não autorizada.'));
                 if (alertBox) {
                     alertBox.textContent = err;
                     alertBox.style.display = 'flex';
@@ -427,7 +430,7 @@ function gen3SubmitCreditCard(e) {
             }
         } catch (err) {
             if (alertBox) {
-                alertBox.textContent = 'Erro ao processar resposta do servidor.';
+                alertBox.textContent = i18n.server_error || 'Erro ao processar resposta do servidor.';
                 alertBox.style.display = 'flex';
             }
         }
@@ -439,7 +442,7 @@ function gen3SubmitCreditCard(e) {
             btn.innerHTML = originalBtnHtml;
         }
         if (alertBox) {
-            alertBox.textContent = 'Erro de conexão com o servidor.';
+            alertBox.textContent = i18n.conn_error || 'Erro de conexão com o servidor.';
             alertBox.style.display = 'flex';
         }
     };

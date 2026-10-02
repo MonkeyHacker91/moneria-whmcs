@@ -32,12 +32,12 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
     <?php else: ?>
         <div class="moneria-head gen3-boleto__head">
             <div class="moneria-brand gen3-boleto__brand">
-                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? 'PIX'); ?></span>
+                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? \Moneria\Gateway\MoneriaHelper::trans('pix')); ?></span>
                 <span class="moneria-amount" style="font-size: 1rem; font-weight: 700; color: var(--gb-text); margin-left: 4px;"><?php echo htmlspecialchars($amountFormatted); ?></span>
             </div>
             <div class="moneria-due gen3-boleto__due">
-                <span>Status</span>
-                <strong style="color: #4ade80;">Instantâneo</strong>
+                <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('status'); ?></span>
+                <strong style="color: #4ade80;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('status_instant'); ?></strong>
             </div>
         </div>
 
@@ -55,7 +55,7 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
             </div>
         <?php endif; ?>
 
-        <p class="moneria-lead gen3-boleto__lead">Escaneie o QR Code acima ou use a chave Copia e Cola:</p>
+        <p class="moneria-lead gen3-boleto__lead"><?php echo \Moneria\Gateway\MoneriaHelper::trans('scan_or_copy'); ?></p>
 
         <?php if (!empty($pixQrCode)): ?>
             <div class="moneria-code-group gen3-code-group">
@@ -65,19 +65,19 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
                     type="text"
                     readonly
                     value="<?php echo htmlspecialchars($pixQrCode); ?>"
-                    aria-label="Código Pix Copia e Cola"
+                    aria-label="<?php echo htmlspecialchars(\Moneria\Gateway\MoneriaHelper::trans('pix_code_aria')); ?>"
                     onclick="this.select();"
                 >
                 <button type="button" class="moneria-copy-btn gen3-copy-btn gen3-boleto__copy" onclick="moneriaPerformCopy('gen3-dedicated-pix-val', this)">
                     <i class="fas fa-copy" aria-hidden="true"></i>
-                    <span>Copiar</span>
+                    <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('copy'); ?></span>
                 </button>
             </div>
         <?php endif; ?>
 
         <div class="moneria-status-line gen3-status-line">
             <div class="moneria-status-spinner gen3-status-spinner"></div>
-            <span>Aguardando pagamento... A baixa é instantânea.</span>
+            <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('waiting_payment'); ?></span>
         </div>
     <?php endif; ?>
 </div>
@@ -361,19 +361,22 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
 </style>
 
 <script>
+window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations()); ?>;
+
 function moneriaPerformCopy(inputId, btn) {
     var input = document.getElementById(inputId);
     if (!input) return;
     var value = input.value || '';
+    var i18n = window.moneriaI18n || { copy: 'Copiar', copied: 'Copiado!' };
     
     function done() {
         if (!btn) return;
         btn.classList.add('is-copied');
         var span = btn.querySelector('span');
-        if (span) span.textContent = 'Copiado!';
+        if (span) span.textContent = i18n.copied || 'Copiado!';
         setTimeout(function () {
             btn.classList.remove('is-copied');
-            if (span) span.textContent = 'Copiar';
+            if (span) span.textContent = i18n.copy || 'Copiar';
         }, 1600);
     }
 
