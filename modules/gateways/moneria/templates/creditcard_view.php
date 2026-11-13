@@ -35,17 +35,34 @@ $currentYear = (int)date('Y');
     <?php else: ?>
         <div class="moneria-head gen3-boleto__head">
             <div class="moneria-brand gen3-boleto__brand">
-                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? \Moneria\Gateway\MoneriaHelper::trans('creditcard')); ?></span>
-                <span class="moneria-amount" style="font-size: 1rem; font-weight: 700; color: var(--gb-text); margin-left: 4px;"><?php echo htmlspecialchars($amountFormatted); ?></span>
+                <span class="moneria-amount" style="font-size: 1rem; font-weight: 700; color: var(--gb-text);"><?php echo htmlspecialchars($amountFormatted); ?></span>
             </div>
             <div class="moneria-due gen3-boleto__due">
-                <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('status'); ?></span>
-                <strong style="color: #38bdf8;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('status_online'); ?></strong>
+                <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('due_date'); ?></span>
+                <strong><?php echo htmlspecialchars($dueDateFormatted ?? ''); ?></strong>
             </div>
         </div>
 
         <div id="gen3-cc-alert-box" class="moneria-note gen3-boleto__note" style="display: none; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.12); color: #fca5a5;"></div>
         <div id="gen3-cc-success-box" class="moneria-note gen3-boleto__note" style="display: none; border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.12); color: #86efac;"></div>
+
+        <?php if (!empty($savedCards)): ?>
+            <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--gb-border);">
+                <label style="display:block; font-size:11px; color:var(--gb-muted); text-transform:uppercase; margin-bottom:4px; font-weight:600; letter-spacing:0.04em;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_saved_title'); ?></label>
+                <select id="gen3_field_cc_saved" class="moneria-code-input gen3-code-input gen3-boleto__code" style="width: 100%; margin-bottom: 10px !important;">
+                    <?php foreach ($savedCards as $savedCard): ?>
+                        <option value="<?php echo (int)$savedCard['id']; ?>">
+                            <?php echo htmlspecialchars($savedCard['brand'] . ' •••• ' . $savedCard['last4'] . ($savedCard['expiry'] ? ' (' . \Moneria\Gateway\MoneriaHelper::trans('card_expires') . ' ' . $savedCard['expiry'] . ')' : '')); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <button type="button" id="gen3_cc_saved_btn" class="moneria-print-btn gen3-print-btn gen3-boleto__print" onclick="return gen3PaySavedCard()">
+                    <i class="fas fa-bolt" aria-hidden="true"></i>
+                    <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_pay_saved'); ?> (<?php echo htmlspecialchars($amountFormatted); ?>)</span>
+                </button>
+                <div style="margin-top: 14px; font-size: 11px; color: var(--gb-muted); text-transform: uppercase; letter-spacing: 0.04em; text-align: center;"><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_or_new'); ?></div>
+            </div>
+        <?php endif; ?>
 
         <form id="gen3-moneria-cc-form" onsubmit="return gen3SubmitCreditCard(event)">
             <div style="margin-bottom: 12px;">
@@ -101,6 +118,13 @@ $currentYear = (int)date('Y');
                 </div>
             <?php else: ?>
                 <input type="hidden" id="gen3_field_cc_installments" value="1" />
+            <?php endif; ?>
+
+            <?php if (!empty($allowSaveCard)): ?>
+                <label style="display:flex; align-items:flex-start; gap:8px; margin-bottom:16px; font-size:0.8125rem; color:var(--gb-text); cursor:pointer;">
+                    <input type="checkbox" id="gen3_field_cc_save" style="margin-top:2px;" />
+                    <span><?php echo \Moneria\Gateway\MoneriaHelper::trans('card_save_label'); ?></span>
+                </label>
             <?php endif; ?>
 
             <button type="submit" id="gen3_cc_submit_btn" class="moneria-print-btn gen3-print-btn gen3-boleto__print">
@@ -168,6 +192,9 @@ $currentYear = (int)date('Y');
   color: #0284c7 !important;
 }
 .moneria-payment-box.moneria-theme-light .moneria-amount {
+  color: #0f172a !important;
+}
+.moneria-payment-box.moneria-theme-light .gen3-boleto__due strong {
   color: #0f172a !important;
 }
 .moneria-payment-box.moneria-theme-light .gen3-code-input {
@@ -263,6 +290,7 @@ $currentYear = (int)date('Y');
 .gen3-boleto__due strong {
   font-size: 0.95rem;
   font-weight: 700;
+  color: var(--gb-text);
 }
 
 .gen3-code-input {
@@ -333,13 +361,13 @@ $currentYear = (int)date('Y');
 </style>
 
 <script>
-window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations()); ?>;
+window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 
 var ccNumEl = document.getElementById('gen3_field_cc_num');
 if (ccNumEl) {
     ccNumEl.addEventListener('input', function(e) {
-        var v = e.target.value.replace(/\D/g, '').substring(0, 16);
-        var matches = v.match(/\d{4,16}/g);
+        var v = e.target.value.replace(/\D/g, '').substring(0, 19);
+        var matches = v.match(/\d{4,19}/g);
         var match = matches && matches[0] || '';
         var parts = [];
         for (var i = 0, len = match.length; i < len; i += 4) {
@@ -384,6 +412,37 @@ function gen3SubmitCreditCard(e) {
         return false;
     }
 
+    var saveEl = document.getElementById('gen3_field_cc_save');
+
+    return gen3SendCardPayment({
+        number: number,
+        name: name,
+        document: doc,
+        month: parseInt(month, 10),
+        year: parseInt(year, 10),
+        cvv: cvv,
+        installments: parseInt(installments, 10) || 1,
+        save_card: !!(saveEl && saveEl.checked)
+    }, btn);
+}
+
+function gen3PaySavedCard() {
+    var savedEl = document.getElementById('gen3_field_cc_saved');
+    if (!savedEl) return false;
+    return gen3SendCardPayment({
+        paymethod_id: parseInt(savedEl.value, 10),
+        installments: 1
+    }, document.getElementById('gen3_cc_saved_btn'));
+}
+
+function gen3SendCardPayment(fields, btn) {
+    var alertBox = document.getElementById('gen3-cc-alert-box');
+    var successBox = document.getElementById('gen3-cc-success-box');
+    var i18n = window.moneriaI18n || {};
+
+    if (alertBox) alertBox.style.display = 'none';
+    if (successBox) successBox.style.display = 'none';
+
     var originalBtnHtml = btn ? btn.innerHTML : '';
     if (btn) {
         btn.disabled = true;
@@ -393,15 +452,11 @@ function gen3SubmitCreditCard(e) {
     var payload = {
         action: 'process_creditcard',
         invoiceid: <?php echo (int)$invoiceId; ?>,
-        token: <?php echo json_encode($cardToken ?? ''); ?>,
-        number: number,
-        name: name,
-        document: doc,
-        month: parseInt(month, 10),
-        year: parseInt(year, 10),
-        cvv: cvv,
-        installments: parseInt(installments, 10) || 1
+        token: <?php echo json_encode($cardToken ?? ''); ?>
     };
+    for (var key in fields) {
+        if (Object.prototype.hasOwnProperty.call(fields, key)) payload[key] = fields[key];
+    }
 
     var xhr = new XMLHttpRequest();
     xhr.open('POST', <?php echo json_encode($processUrl); ?>, true);
@@ -451,5 +506,6 @@ function gen3SubmitCreditCard(e) {
     return false;
 }
 window.gen3SubmitCreditCard = gen3SubmitCreditCard;
+window.gen3PaySavedCard = gen3PaySavedCard;
 window.moneriaSubmitCreditCard = gen3SubmitCreditCard;
 </script>

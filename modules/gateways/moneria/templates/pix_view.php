@@ -361,7 +361,7 @@ $inlineStyle = !empty($themeVars['inlineStyle']) ? $themeVars['inlineStyle'] : '
 </style>
 
 <script>
-window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations()); ?>;
+window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 
 function moneriaPerformCopy(inputId, btn) {
     var input = document.getElementById(inputId);

@@ -39,7 +39,7 @@ if (empty($gatewayParams['clientId']) || empty($gatewayParams['clientSecret'])) 
 
 if (php_sapi_name() !== 'cli') {
     $expectedToken = hash_hmac('sha256', 'moneria_cron', $gatewayParams['clientSecret']);
-    if (!hash_equals($expectedToken, (string)$token) && $token !== $gatewayParams['clientSecret']) {
+    if (!hash_equals($expectedToken, (string)$token)) {
         die("Access denied: invalid token\n");
     }
 }
@@ -86,11 +86,18 @@ foreach ($pendingCharges as $c) {
             $paidAmount = (float)($invData['paidAmount'] ?? ($tx['amount'] ?? $c->total));
             $fee = (float)($tx['totalFee'] ?? ($tx['fee'] ?? 0.89));
             $transId = $tx['id'] ?? $chargeId;
-            
-            // Mark paid in WHMCS
+            if (empty($transId)) {
+                continue;
+            }
+
+            // Avoid duplicate payments (checkCbTransID dies and would abort the whole loop)
+            if (Capsule::table('tblaccounts')->where('transid', $transId)->exists()) {
+                continue;
+            }
+
             addInvoicePayment($invoiceId, $transId, $paidAmount, $fee, 'moneria');
             Capsule::table('mod_moneria_charges')->where('invoice_id', $invoiceId)->update(['status' => 'CONFIRMED']);
-            
+
             logTransaction('moneria', [
                 'invoiceid' => $invoiceId,
                 'transid' => $transId,
@@ -99,7 +106,7 @@ foreach ($pendingCharges as $c) {
                 'fee' => $fee,
                 'source' => 'moneria_cron_sync'
             ], 'Auto-Sync: Payment Confirmed');
-            
+
             echo "Invoice #$invoiceId ($chargeId) synced and marked as PAID!\n";
             $synced++;
         }

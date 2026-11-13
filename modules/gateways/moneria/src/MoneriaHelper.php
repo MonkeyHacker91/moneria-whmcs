@@ -881,7 +881,7 @@ class MoneriaHelper
                 curl_setopt($ch, CURLOPT_HEADER, 0);
                 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
                 curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
                 curl_exec($ch);
                 curl_close($ch);
                 fclose($fp);
@@ -949,18 +949,20 @@ class MoneriaHelper
 
             // Check if charge already exists
             $existing = self::getInvoiceCharge($invoiceId);
-            if ($existing && !empty($existing['id']) && !$force) {
-                $existingAmount = (float)($existing['amount'] ?? ($existing['total'] ?? 0));
-                $existingStatus = strtoupper($existing['status'] ?? '');
+            if ($existing && !empty($existing['id'])) {
+                if (!$force) {
+                    $existingAmount = (float)($existing['amount'] ?? ($existing['total'] ?? 0));
+                    $existingStatus = strtoupper($existing['status'] ?? '');
 
-                $isStatusValid = !in_array($existingStatus, ['CANCELED', 'CANCELLED', 'EXPIRED', 'FAILED'], true);
-                $isAmountMatch = ($existingAmount > 0 && abs($existingAmount - $expectedAmount) < 0.01);
+                    $isStatusValid = !in_array($existingStatus, ['CANCELED', 'CANCELLED', 'EXPIRED', 'FAILED'], true);
+                    $isAmountMatch = ($existingAmount > 0 && abs($existingAmount - $expectedAmount) < 0.01);
 
-                if ($isStatusValid && $isAmountMatch) {
-                    return $existing;
+                    if ($isStatusValid && $isAmountMatch) {
+                        return $existing;
+                    }
                 }
 
-                // If amount changed or status is invalid, cancel previous outdated charge on Moneria before creating a new one
+                // Amount/status change OR forced refresh: cancel previous charge so it cannot stay payable
                 try {
                     $client = new MoneriaClient($clientId, $clientSecret, $baseUrl, $debug);
                     $client->cancelCharge($existing['id']);
@@ -1036,15 +1038,8 @@ class MoneriaHelper
                 return null;
             }
 
-            $gwName = $gatewayParams['paymentmethod'] ?? ($invoice->paymentmethod ?? 'moneria');
-            if ($gwName === 'moneria_pix') {
-                $paymentMethods = ['PIX'];
-            } elseif ($gwName === 'moneria_boleto') {
-                $paymentMethods = ['BOLETO'];
-            } else {
-                $methodsConfig = $gatewayParams['paymentMethods'] ?? 'PIX_BOLETO';
-                $paymentMethods = ($methodsConfig === 'PIX_ONLY') ? ['PIX'] : (($methodsConfig === 'BOLETO_ONLY') ? ['BOLETO'] : ['PIX', 'BOLETO']);
-            }
+            $methodsConfig = $gatewayParams['paymentMethods'] ?? 'PIX_BOLETO';
+            $paymentMethods = ($methodsConfig === 'PIX_ONLY') ? ['PIX'] : (($methodsConfig === 'BOLETO_ONLY') ? ['BOLETO'] : ['PIX', 'BOLETO']);
 
             $systemUrl = rtrim(\WHMCS\Config\Setting::getValue('SystemURL') ?? '', '/');
             $postBackUrl = $systemUrl . '/modules/gateways/callback/moneria.php';
@@ -1067,6 +1062,9 @@ class MoneriaHelper
                 'dueDate'        => $dueDate,
                 'postBackUrl'    => $postBackUrl,
                 'expirationDays' => (int)($gatewayParams['expirationDays'] ?? 30),
+                'metadata'       => [
+                    'invoice_id' => $invoiceId
+                ]
             ];
 
             if (!empty($gatewayParams['applyFine'])) {
@@ -1101,6 +1099,105 @@ class MoneriaHelper
     }
 
     /**
+     * Returns the client IP. Forwarded headers are only trusted when the direct peer
+     * is a private/loopback address (i.e. a local reverse proxy), so they cannot be spoofed
+     * by external clients.
+     *
+     * @return string
+     */
+    public static function getClientIp(): string
+    {
+        $remote = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+        $isLocalProxy = $remote !== '' && filter_var(
+            $remote,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+        ) === false;
+
+        if ($isLocalProxy) {
+            // Cloudflare sets this; clients cannot forge it to the origin when traffic is through CF.
+            if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+                $cf = trim((string)$_SERVER['HTTP_CF_CONNECTING_IP']);
+                if (filter_var($cf, FILTER_VALIDATE_IP)) {
+                    return $cf;
+                }
+            }
+            // With one reverse proxy that appends, the rightmost XFF entry is the one the proxy saw.
+            // Using the leftmost value lets clients rotate spoofed IPs and bypass rate limits.
+            if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+                $parts = array_map('trim', explode(',', (string)$_SERVER['HTTP_X_FORWARDED_FOR']));
+                for ($i = count($parts) - 1; $i >= 0; $i--) {
+                    if (filter_var($parts[$i], FILTER_VALIDATE_IP)) {
+                        return $parts[$i];
+                    }
+                }
+            }
+        }
+
+        return filter_var($remote, FILTER_VALIDATE_IP) ? $remote : '127.0.0.1';
+    }
+
+    /**
+     * Whether the counter for $key already reached $max hits inside the active window.
+     *
+     * @param string $key
+     * @param int $max
+     * @param int $windowSeconds
+     * @return bool
+     */
+    public static function rateLimitExceeded(string $key, int $max, int $windowSeconds): bool
+    {
+        try {
+            self::ensureTables();
+            $record = Capsule::table('mod_moneria_meta')
+                ->where('setting_key', 'rl_' . md5($key))
+                ->first();
+            if ($record && (int)$record->expires_at > time()) {
+                return (int)$record->setting_value >= $max;
+            }
+        } catch (\Throwable $t) {
+            // If the counter is unavailable, do not block legitimate payments
+        }
+        return false;
+    }
+
+    /**
+     * Registers one hit for $key. The window starts on the first hit.
+     *
+     * @param string $key
+     * @param int $windowSeconds
+     * @return void
+     */
+    public static function rateLimitHit(string $key, int $windowSeconds): void
+    {
+        try {
+            self::ensureTables();
+            $dbKey = 'rl_' . md5($key);
+            $record = Capsule::table('mod_moneria_meta')->where('setting_key', $dbKey)->first();
+
+            if ($record && (int)$record->expires_at > time()) {
+                Capsule::table('mod_moneria_meta')
+                    ->where('setting_key', $dbKey)
+                    ->update([
+                        'setting_value' => (string)((int)$record->setting_value + 1),
+                        'updated_at'    => date('Y-m-d H:i:s'),
+                    ]);
+            } else {
+                Capsule::table('mod_moneria_meta')->updateOrInsert(
+                    ['setting_key' => $dbKey],
+                    [
+                        'setting_value' => '1',
+                        'expires_at'    => time() + $windowSeconds,
+                        'updated_at'    => date('Y-m-d H:i:s'),
+                    ]
+                );
+            }
+        } catch (\Throwable $t) {
+            // Fail open: never block a payment because the counter failed
+        }
+    }
+
+    /**
      * Instantiates a MoneriaClient from gateway parameters.
      *
      * @param array $gatewayParams
@@ -1120,6 +1217,176 @@ class MoneriaHelper
         $debug = !empty($gatewayParams['debug']);
 
         return new MoneriaClient($clientId, $clientSecret, $baseUrl, $debug);
+    }
+
+    /**
+     * Whether the "save card / automatic billing" option is enabled on moneria_creditcard
+     * for the given client (optionally restricted to a list of client IDs).
+     *
+     * @param int $userId
+     * @param array|null $params moneria_creditcard gateway params
+     * @return bool
+     */
+    public static function isCardSavingEnabled(int $userId, ?array $params = null): bool
+    {
+        $params = $params ?? self::getGatewayParams('moneria_creditcard');
+        if (empty($params['autoBilling']) || $params['autoBilling'] === 'off') {
+            return false;
+        }
+
+        $allowed = array_filter(array_map('intval', preg_split('/[\s,;]+/', (string)($params['autoBillingClients'] ?? ''))));
+        return empty($allowed) || in_array($userId, $allowed, true);
+    }
+
+    /**
+     * Detects the card brand from the card number (WHMCS card type naming).
+     *
+     * @param string $number
+     * @return string
+     */
+    public static function detectCardBrand(string $number): string
+    {
+        $n = self::onlyNumbers($number);
+        $patterns = [
+            'Elo'              => '/^(401178|401179|431274|438935|451416|457393|457631|457632|504175|506699|5067|509|627780|636297|636368|650|6516|6550)/',
+            'Hipercard'        => '/^(606282|3841)/',
+            'American Express' => '/^3[47]/',
+            'Diners Club'      => '/^3(0[0-5]|[68])/',
+            'Discover'         => '/^6(011|5)/',
+            'JCB'              => '/^35/',
+            'Visa'             => '/^4/',
+            'MasterCard'       => '/^(5[1-5]|2(2[2-9]|[3-6]|7[01]|720))/',
+        ];
+        foreach ($patterns as $brand => $regex) {
+            if (preg_match($regex, $n)) {
+                return $brand;
+            }
+        }
+        return 'Card';
+    }
+
+    /**
+     * Lists the client's saved Moneria cards (WHMCS Pay Methods of moneria_creditcard).
+     *
+     * @param int $userId
+     * @return array<int, array{id:int, last4:string, brand:string, expiry:string, token:string}>
+     */
+    public static function getSavedCards(int $userId): array
+    {
+        $cards = [];
+        if ($userId <= 0 || !class_exists('WHMCS\Payment\PayMethod\Model')) {
+            return $cards;
+        }
+
+        try {
+            $payMethods = \WHMCS\Payment\PayMethod\Model::where('userid', $userId)
+                ->where('gateway_name', 'moneria_creditcard')
+                ->orderBy('order_preference')
+                ->get();
+
+            foreach ($payMethods as $payMethod) {
+                if (!$payMethod->isCreditCard()) {
+                    continue;
+                }
+                $payment = $payMethod->payment;
+                $token = method_exists($payment, 'getRemoteToken') ? (string)$payment->getRemoteToken() : '';
+                if ($token === '') {
+                    continue;
+                }
+                $expiry = $payment->getExpiryDate();
+                $cards[] = [
+                    'id'     => (int)$payMethod->id,
+                    'last4'  => (string)$payment->getLastFour(),
+                    'brand'  => (string)$payment->getCardType(),
+                    'expiry' => $expiry ? $expiry->format('m/Y') : '',
+                    'token'  => $token,
+                ];
+            }
+        } catch (\Throwable $t) {
+            // Pay Methods unavailable: behave as if there are no saved cards
+        }
+
+        return $cards;
+    }
+
+    /**
+     * Finds one saved Moneria card that belongs to the given client.
+     *
+     * @param int $userId
+     * @param int $payMethodId
+     * @return array|null
+     */
+    public static function findSavedCard(int $userId, int $payMethodId): ?array
+    {
+        foreach (self::getSavedCards($userId) as $card) {
+            if ($card['id'] === $payMethodId) {
+                return $card;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Tokenizes a card on Moneria and stores it as a WHMCS Pay Method of the client.
+     * Re-uses the existing Pay Method when the same card (last 4 + expiry) is already saved.
+     *
+     * @param int $userId
+     * @param MoneriaClient $client
+     * @param array $card CreditCardRequest payload (number, cvv, expirationMonth, expirationYear, ...)
+     * @return int Pay Method id
+     * @throws Exception
+     */
+    public static function saveCardForClient(int $userId, MoneriaClient $client, array $card): int
+    {
+        if (!function_exists('createCardPayMethod')) {
+            require_once ROOTDIR . '/includes/gatewayfunctions.php';
+        }
+
+        $tokenized = $client->tokenizeCard($card);
+        $tokenId = (string)$tokenized['id'];
+
+        $number = self::onlyNumbers($card['number'] ?? '');
+        $last4 = substr($number, -4);
+        $expiry = sprintf('%02d%02d', (int)$card['expirationMonth'], ((int)$card['expirationYear']) % 100);
+
+        foreach (self::getSavedCards($userId) as $saved) {
+            if ($saved['last4'] === $last4 && $saved['expiry'] === sprintf('%02d/%04d', (int)$card['expirationMonth'], (int)$card['expirationYear'])) {
+                updateCardPayMethod($userId, $saved['id'], $expiry, null, null, $tokenId);
+                return $saved['id'];
+            }
+        }
+
+        createCardPayMethod($userId, 'moneria_creditcard', $last4, $expiry, self::detectCardBrand($number), null, null, $tokenId);
+
+        // createCardPayMethod() returns a boolean on WHMCS 9, so look the new Pay Method up by its token.
+        foreach (self::getSavedCards($userId) as $saved) {
+            if ($saved['token'] === $tokenId) {
+                return $saved['id'];
+            }
+        }
+        throw new Exception('Cartão tokenizado, mas não foi possível registrá-lo no WHMCS.');
+    }
+
+    /**
+     * Moves the client's active services, addons and domains billed by other Moneria gateways
+     * to moneria_creditcard, so the WHMCS cron charges the saved card on the next invoices.
+     *
+     * @param int $userId
+     * @return void
+     */
+    public static function moveClientBillingToCard(int $userId): void
+    {
+        $from = ['moneria'];
+
+        Capsule::table('tblhosting')->where('userid', $userId)->whereIn('paymentmethod', $from)
+            ->whereIn('domainstatus', ['Active', 'Pending', 'Suspended'])
+            ->update(['paymentmethod' => 'moneria_creditcard']);
+        Capsule::table('tblhostingaddons')->where('userid', $userId)->whereIn('paymentmethod', $from)
+            ->whereIn('status', ['Active', 'Pending', 'Suspended'])
+            ->update(['paymentmethod' => 'moneria_creditcard']);
+        Capsule::table('tbldomains')->where('userid', $userId)->whereIn('paymentmethod', $from)
+            ->whereIn('status', ['Active', 'Pending'])
+            ->update(['paymentmethod' => 'moneria_creditcard']);
     }
 
     /**
@@ -1282,6 +1549,11 @@ class MoneriaHelper
                 'conn_error' => 'Erro de conexão com o servidor.',
                 'doc_required' => '<strong>CPF/CNPJ obrigatório:</strong> Por favor, atualize seus dados cadastrais informando seu CPF ou CNPJ para gerar a cobrança via Moneria.',
                 'charge_error' => '<strong>Não foi possível gerar a cobrança na Moneria.</strong> Por favor, tente novamente ou entre em contato com o suporte.',
+                'card_saved_title' => 'Cartão salvo',
+                'card_pay_saved' => 'Pagar com o cartão salvo',
+                'card_expires' => 'validade',
+                'card_or_new' => 'Ou pague com outro cartão',
+                'card_save_label' => 'Salvar este cartão e pagar as próximas faturas automaticamente',
             ],
             'english' => [
                 'pix_boleto' => 'PIX / Bank Slip',
@@ -1324,6 +1596,11 @@ class MoneriaHelper
                 'conn_error' => 'Server connection error.',
                 'doc_required' => '<strong>Tax ID / Document required:</strong> Please update your profile with your Tax ID / CPF / CNPJ to generate payment.',
                 'charge_error' => '<strong>Could not generate charge on Moneria.</strong> Please try again or contact support.',
+                'card_saved_title' => 'Saved card',
+                'card_pay_saved' => 'Pay with saved card',
+                'card_expires' => 'expires',
+                'card_or_new' => 'Or pay with another card',
+                'card_save_label' => 'Save this card and pay future invoices automatically',
             ],
             'spanish' => [
                 'pix_boleto' => 'PIX / Boleto Bancario',
@@ -1366,6 +1643,11 @@ class MoneriaHelper
                 'conn_error' => 'Error de conexión con el servidor.',
                 'doc_required' => '<strong>Documento obligatorio:</strong> Por favor, actualice sus datos con su identificación fiscal / CPF / CNPJ para generar el pago.',
                 'charge_error' => '<strong>No fue posible generar el cobro en Moneria.</strong> Por favor, intente nuevamente o contacte a soporte.',
+                'card_saved_title' => 'Tarjeta guardada',
+                'card_pay_saved' => 'Pagar con la tarjeta guardada',
+                'card_expires' => 'vence',
+                'card_or_new' => 'O pague con otra tarjeta',
+                'card_save_label' => 'Guardar esta tarjeta y pagar las próximas facturas automáticamente',
             ],
         ];
     }

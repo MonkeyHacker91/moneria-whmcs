@@ -69,13 +69,6 @@ function moneria_config(): array
             'Default' => '',
             'Description' => 'Client Secret da Chave de API gerada no painel da Moneria.',
         ],
-        'environment' => [
-            'FriendlyName' => 'URL da API',
-            'Type' => 'text',
-            'Size' => '40',
-            'Default' => 'https://api.moneria.com.br',
-            'Description' => 'URL base da API Moneria (Padrão: https://api.moneria.com.br)',
-        ],
         'paymentMethods' => [
             'FriendlyName' => 'Métodos Ativos',
             'Type' => 'dropdown',
@@ -251,10 +244,7 @@ function moneria_link(array $params): string
             }
         }
 
-        // If we have Pix code but no base64 image, generate fallback QR Code image URL
-        if (!empty($pixQrCode) && empty($pixQrCodeBase64)) {
-            $pixQrCodeBase64 = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' . urlencode($pixQrCode);
-        }
+        // No third-party QR service: if the API sent no image, the template shows only the Copia e Cola code.
 
         // Format amount for display
         $amountFormatted = 'R$ ' . number_format((float)$amount, 2, ',', '.');
@@ -310,9 +300,12 @@ function moneria_link(array $params): string
             'boletoUrl'        => null,
             'checkUrl'         => $checkUrl,
             'assetsUrl'        => $assetsUrl,
-            'errorMessage'     => 'Erro ao processar cobrança na Moneria: ' . $e->getMessage(),
+            'errorMessage'     => 'Não foi possível processar a cobrança na Moneria. Tente novamente ou contate o suporte.',
         ];
 
         return MoneriaHelper::render(__DIR__ . '/moneria/templates/payment_view.php', $templateData);
     }
 }
+
+
+

@@ -40,7 +40,6 @@ $initialTab = (!empty($defaultTab) && $defaultTab === 'boleto' && $hasBoleto) ? 
     <?php else: ?>
         <div class="moneria-head gen3-boleto__head">
             <div class="moneria-brand gen3-boleto__brand">
-                <span class="moneria-badge gen3-boleto__badge"><?php echo htmlspecialchars($displayTitle ?? \Moneria\Gateway\MoneriaHelper::trans('pix_boleto')); ?></span>
                 <span class="moneria-amount" style="font-size: 1rem; font-weight: 700; color: var(--gb-text); margin-left: 4px;"><?php echo htmlspecialchars($amountFormatted); ?></span>
             </div>
             <div class="moneria-due gen3-boleto__due">
@@ -565,7 +564,7 @@ $initialTab = (!empty($defaultTab) && $defaultTab === 'boleto' && $hasBoleto) ? 
 </style>
 
 <script>
-window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations()); ?>;
+window.moneriaI18n = <?php echo json_encode(\Moneria\Gateway\MoneriaHelper::getJsTranslations(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 
 function moneriaSwitchPaymentTab(tab) {
     var pixPane = document.getElementById('gen3-pane-pix');

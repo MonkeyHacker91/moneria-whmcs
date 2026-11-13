@@ -13,7 +13,6 @@
   <img src="https://img.shields.io/badge/WHMCS-7.10%20to%209.0+-blue?style=flat-square&logo=whmcs" alt="WHMCS Version" />
   <img src="https://img.shields.io/badge/PHP-7.4%20|%208.0%20|%208.1%20|%208.2%20|%208.3-777bb4?style=flat-square&logo=php" alt="PHP Version" />
   <img src="https://img.shields.io/badge/Security-Zero--Trust%20HMAC-success?style=flat-square" alt="Security" />
-  <img src="https://img.shields.io/badge/PCI--DSS-Compliant-brightgreen?style=flat-square" alt="PCI-DSS" />
   <img src="https://img.shields.io/badge/License-MIT-orange?style=flat-square" alt="License" />
 </p>
 

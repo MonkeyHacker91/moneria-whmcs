@@ -31,7 +31,7 @@ add_hook('InvoiceCreated', 1, function(array $vars) {
     }
 
     try {
-        $moneriaGateways = ['moneria', 'moneria_pix', 'moneria_boleto'];
+        $moneriaGateways = ['moneria'];
         $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['paymentmethod', 'status']);
         if ($invoice && in_array($invoice->paymentmethod, $moneriaGateways, true) && strcasecmp($invoice->status, 'Unpaid') === 0) {
             $gatewayParams = MoneriaHelper::getGatewayParams($invoice->paymentmethod);
@@ -39,7 +39,7 @@ add_hook('InvoiceCreated', 1, function(array $vars) {
                 MoneriaHelper::generateChargeForInvoice($invoiceId, $gatewayParams);
             }
         }
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         // Fail safely
     }
 });
@@ -54,7 +54,7 @@ add_hook('InvoiceModified', 1, function(array $vars) {
     }
 
     try {
-        $moneriaGateways = ['moneria', 'moneria_pix', 'moneria_boleto'];
+        $moneriaGateways = ['moneria'];
         $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['paymentmethod', 'status']);
         if ($invoice && in_array($invoice->paymentmethod, $moneriaGateways, true) && strcasecmp($invoice->status, 'Unpaid') === 0) {
             $gatewayParams = MoneriaHelper::getGatewayParams($invoice->paymentmethod);
@@ -62,7 +62,7 @@ add_hook('InvoiceModified', 1, function(array $vars) {
                 MoneriaHelper::generateChargeForInvoice($invoiceId, $gatewayParams, false);
             }
         }
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         // Fail safely
     }
 });
@@ -74,7 +74,7 @@ add_hook('InvoiceDueDateChanged', 1, function(array $vars) {
     }
 
     try {
-        $moneriaGateways = ['moneria', 'moneria_pix', 'moneria_boleto'];
+        $moneriaGateways = ['moneria'];
         $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['paymentmethod', 'status']);
         if ($invoice && in_array($invoice->paymentmethod, $moneriaGateways, true) && strcasecmp($invoice->status, 'Unpaid') === 0) {
             $gatewayParams = MoneriaHelper::getGatewayParams($invoice->paymentmethod);
@@ -82,7 +82,7 @@ add_hook('InvoiceDueDateChanged', 1, function(array $vars) {
                 MoneriaHelper::generateChargeForInvoice($invoiceId, $gatewayParams, false);
             }
         }
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         // Fail safely
     }
 });
@@ -97,7 +97,7 @@ add_hook('InvoiceCancelled', 1, function(array $vars) {
     }
 
     try {
-        $moneriaGateways = ['moneria', 'moneria_pix', 'moneria_boleto', 'moneria_creditcard'];
+        $moneriaGateways = ['moneria', 'moneria_creditcard'];
         $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['paymentmethod']);
         if ($invoice && in_array($invoice->paymentmethod, $moneriaGateways, true)) {
             $gatewayParams = MoneriaHelper::getGatewayParams($invoice->paymentmethod);
@@ -105,7 +105,7 @@ add_hook('InvoiceCancelled', 1, function(array $vars) {
                 MoneriaHelper::cancelInvoiceCharge($invoiceId, $gatewayParams);
             }
         }
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         // Fail safely
     }
 });
@@ -122,10 +122,20 @@ add_hook('InvoiceDeleted', 1, function(array $vars) {
     try {
         $charge = MoneriaHelper::getInvoiceCharge($invoiceId);
         if ($charge && !empty($charge['id'])) {
-            $gatewayParams = MoneriaHelper::getGatewayParams('moneria');
+            // Same credential resolution as InvoiceCancelled (do not hardcode moneria).
+            $paymentMethod = 'moneria';
+            if (!empty($vars['paymentmethod']) && in_array($vars['paymentmethod'], ['moneria', 'moneria_creditcard'], true)) {
+                $paymentMethod = $vars['paymentmethod'];
+            } else {
+                $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['paymentmethod']);
+                if ($invoice && in_array($invoice->paymentmethod, ['moneria', 'moneria_creditcard'], true)) {
+                    $paymentMethod = $invoice->paymentmethod;
+                }
+            }
+            $gatewayParams = MoneriaHelper::getGatewayParams($paymentMethod);
             MoneriaHelper::cancelInvoiceCharge($invoiceId, $gatewayParams);
         }
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         // Fail safely
     }
 });
@@ -156,7 +166,7 @@ add_hook('EmailPreSend', 1, function(array $vars) {
     $invoiceId = $relId;
 
     try {
-        $moneriaGateways = ['moneria', 'moneria_pix', 'moneria_boleto', 'moneria_creditcard'];
+        $moneriaGateways = ['moneria', 'moneria_creditcard'];
         $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['id', 'paymentmethod', 'status', 'total', 'duedate']);
         if (!$invoice || !in_array($invoice->paymentmethod, $moneriaGateways, true)) {
             return [];
@@ -253,9 +263,13 @@ add_hook('EmailPreSend', 1, function(array $vars) {
             'moneria_payment_box'      => $paymentBoxHtml,
             'moneria_pix_code'         => $pixQrCode,
             'moneria_pix_qrcode'       => $pixQrCodeBase64,
-            'moneria_pix_img_tag'      => !empty($pixQrCodeBase64) ? '<img src="' . (strpos($pixQrCodeBase64, 'data:') === 0 ? $pixQrCodeBase64 : 'data:image/png;base64,' . $pixQrCodeBase64) . '" width="180" height="180" style="display:block;margin:10px auto;" />' : '',
-            'moneria_boleto_url'       => $boletoUrl,
-            'moneria_boleto_barcode'   => $boletoBarCode,
+            'moneria_pix_img_tag'      => !empty($pixQrCodeBase64) ? '<img src="' . htmlspecialchars(
+                (strpos($pixQrCodeBase64, 'data:') === 0 ? $pixQrCodeBase64 : 'data:image/png;base64,' . $pixQrCodeBase64),
+                ENT_QUOTES,
+                'UTF-8'
+            ) . '" width="180" height="180" style="display:block;margin:10px auto;" />' : '',
+            'moneria_boleto_url'       => htmlspecialchars((string)$boletoUrl, ENT_QUOTES, 'UTF-8'),
+            'moneria_boleto_barcode'   => htmlspecialchars((string)$boletoBarCode, ENT_QUOTES, 'UTF-8'),
             'moneria_payment_link'     => $directInvoiceUrl,
             'moneria_whatsapp_text'    => $whatsappMsg,
             'invoice_moneria_pix_code' => $pixQrCode,
@@ -306,7 +320,7 @@ add_hook('EmailPreSend', 1, function(array $vars) {
 
         return $return;
 
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         return [];
     }
 });
@@ -321,7 +335,7 @@ add_hook('AdminInvoicesControlsOutput', 1, function(array $vars) {
     }
 
     try {
-        $moneriaGateways = ['moneria', 'moneria_pix', 'moneria_boleto', 'moneria_creditcard'];
+        $moneriaGateways = ['moneria', 'moneria_creditcard'];
         $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['id', 'paymentmethod', 'status', 'total', 'duedate']);
         if (!$invoice || !in_array($invoice->paymentmethod, $moneriaGateways, true)) {
             return '';
@@ -332,8 +346,8 @@ add_hook('AdminInvoicesControlsOutput', 1, function(array $vars) {
             return '';
         }
 
-        $forceRefresh = !empty($_GET['moneria_refresh']);
-        $charge = MoneriaHelper::generateChargeForInvoice($invoiceId, $gatewayParams, $forceRefresh);
+        // Never force-regenerate from GET (CSRF / orphaned payable charges). Reuse existing charge.
+        $charge = MoneriaHelper::generateChargeForInvoice($invoiceId, $gatewayParams, false);
         if (!$charge) {
             $charge = MoneriaHelper::getInvoiceCharge($invoiceId);
         }
@@ -437,7 +451,7 @@ add_hook('AdminInvoicesControlsOutput', 1, function(array $vars) {
         </div>
         <?php
         return ob_get_clean();
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         return '';
     }
 });
@@ -455,7 +469,7 @@ add_hook('DailyCronJob', 1, function(array $vars) {
             return;
         }
 
-        $client = new Moneria\Gateway\MoneriaClient($gwParams['clientId'], $gwParams['clientSecret'], 'https://api.moneria.com.br');
+        $client = MoneriaHelper::createClient($gwParams);
 
         $pendingCharges = Capsule::table('mod_moneria_charges')
             ->join('tblinvoices', 'tblinvoices.id', '=', 'mod_moneria_charges.invoice_id')
@@ -507,10 +521,17 @@ add_hook('DailyCronJob', 1, function(array $vars) {
                 }
 
                 if ($isPaid) {
-                    $txId = $txId ?: ($charge['id'] ?? uniqid('mon_sync_'));
+                    // Prefer stable provider ids only — never invent uniqid (would bypass duplicate checks).
+                    $txId = $txId ?: ($charge['id'] ?? '');
+                    if ($txId === '') {
+                        continue;
+                    }
                     $actualGateway = $item->paymentmethod ?: 'moneria';
 
-                    checkCbTransID($txId);
+                    // checkCbTransID() dies on duplicates and would abort the whole cron loop
+                    if (Capsule::table('tblaccounts')->where('transid', $txId)->exists()) {
+                        continue;
+                    }
                     addInvoicePayment(
                         $invoiceId,
                         $txId,

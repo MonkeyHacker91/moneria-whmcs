@@ -41,8 +41,8 @@ function moneriaGetActiveParams() {
         } catch (\Throwable $t) {}
     }
 
-    // 2. Try individual modules if active
-    $modules = ['moneria_pix', 'moneria_boleto', 'moneria_creditcard'];
+    // 2. Try credit card module if active
+    $modules = ['moneria_creditcard'];
     foreach ($modules as $mod) {
         if (in_array($mod, $activeGateways, true)) {
             try {
@@ -121,9 +121,10 @@ if ($action === 'check_status') {
             'status' => $invoice->status,
         ]);
         exit;
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
+        logTransaction('moneria', ['invoiceid' => $invoiceId, 'error' => $e->getMessage()], 'Erro em check_status');
         http_response_code(500);
-        echo json_encode(['paid' => false, 'error' => $e->getMessage()]);
+        echo json_encode(['paid' => false, 'error' => 'Erro interno ao consultar a fatura.']);
         exit;
     }
 }
@@ -143,6 +144,8 @@ if ($action === 'process_creditcard') {
     $expYear = (int)($jsonBody['year'] ?? ($_POST['year'] ?? 0));
     $cvv = trim($jsonBody['cvv'] ?? ($_POST['cvv'] ?? ''));
     $installments = (int)($jsonBody['installments'] ?? ($_POST['installments'] ?? 1));
+    $payMethodId = (int)($jsonBody['paymethod_id'] ?? ($_POST['paymethod_id'] ?? 0));
+    $saveCard = !empty($jsonBody['save_card'] ?? ($_POST['save_card'] ?? false));
 
     if ($invoiceId <= 0) {
         echo json_encode(['success' => false, 'error' => 'Fatura inválida ou não informada.']);
@@ -173,23 +176,77 @@ if ($action === 'process_creditcard') {
         }
 
         // Security 2: Strict HMAC CSRF Token verification
-        $secret = (string)($gatewayParams['clientSecret'] ?? '');
-        if (!empty($invoice->paymentmethod)) {
+        // The form may have been rendered by moneria_creditcard while the invoice belongs to another Moneria gateway.
+        $secrets = [(string)($gatewayParams['clientSecret'] ?? '')];
+        foreach (array_unique(array_filter([$invoice->paymentmethod, 'moneria_creditcard'])) as $gw) {
             try {
-                $p = getGatewayVariables($invoice->paymentmethod);
+                $p = getGatewayVariables($gw);
                 if (!empty($p['clientSecret'])) {
-                    $secret = (string)$p['clientSecret'];
+                    $secrets[] = (string)$p['clientSecret'];
                 }
             } catch (\Throwable $t) {}
         }
-        $expectedCardToken = !empty($secret) ? hash_hmac('sha256', 'cc_invoice_' . $invoiceId, $secret) : '';
-        if (empty($expectedCardToken) || empty($cardToken) || !hash_equals($expectedCardToken, $cardToken)) {
+        $validCardToken = false;
+        foreach (array_unique(array_filter($secrets)) as $secret) {
+            if ($cardToken !== '' && hash_equals(hash_hmac('sha256', 'cc_invoice_' . $invoiceId, $secret), $cardToken)) {
+                $validCardToken = true;
+                break;
+            }
+        }
+        if (!$validCardToken) {
             http_response_code(403);
             echo json_encode(['success' => false, 'error' => 'Token de segurança inválido ou expirado. Atualize a página e tente novamente.']);
             exit;
         }
 
-        if (empty($cardNumber) || strlen($cardNumber) < 13) {
+        // Anti card-testing: limit attempts per invoice, per client and per IP (15 min window)
+        $rlIp = MoneriaHelper::getClientIp();
+        if (
+            MoneriaHelper::rateLimitExceeded('cc_inv_' . $invoiceId, 5, 900)
+            || MoneriaHelper::rateLimitExceeded('cc_usr_' . (int)$invoice->userid, 10, 900)
+            || MoneriaHelper::rateLimitExceeded('cc_ip_' . $rlIp, 15, 900)
+        ) {
+            http_response_code(429);
+            echo json_encode(['success' => false, 'error' => 'Muitas tentativas. Aguarde alguns minutos e tente novamente.']);
+            exit;
+        }
+        MoneriaHelper::rateLimitHit('cc_inv_' . $invoiceId, 900);
+        MoneriaHelper::rateLimitHit('cc_usr_' . (int)$invoice->userid, 900);
+        MoneriaHelper::rateLimitHit('cc_ip_' . $rlIp, 900);
+
+        // Basic card field validation (clear messages instead of generic API errors)
+        if ($payMethodId <= 0) {
+            if ($holderName === '' || $cvv === '' || !ctype_digit($cvv) || strlen($cvv) < 3 || strlen($cvv) > 4) {
+                echo json_encode(['success' => false, 'error' => 'Dados do cartão incompletos ou inválidos.']);
+                exit;
+            }
+            $fullYear = $expYear < 100 ? (2000 + $expYear) : $expYear;
+            if ($expMonth < 1 || $expMonth > 12 || $fullYear < (int)date('Y') || ($fullYear === (int)date('Y') && $expMonth < (int)date('n'))) {
+                echo json_encode(['success' => false, 'error' => 'Validade do cartão inválida.']);
+                exit;
+            }
+        }
+        $maxInst = (int)(getGatewayVariables('moneria_creditcard')['maxInstallments'] ?? 12);
+        if ($installments < 1 || $installments > max(1, $maxInst)) {
+            echo json_encode(['success' => false, 'error' => 'Número de parcelas inválido.']);
+            exit;
+        }
+
+        $savedCard = null;
+        if ($payMethodId > 0) {
+            $savedCard = MoneriaHelper::isCardSavingEnabled((int)$invoice->userid) ? MoneriaHelper::findSavedCard((int)$invoice->userid, $payMethodId) : null;
+            if (!$savedCard) {
+                echo json_encode(['success' => false, 'error' => 'Cartão salvo não encontrado.']);
+                exit;
+            }
+            if (empty($holderDoc)) {
+                $holderDoc = MoneriaHelper::extractDocument([
+                    'invoiceid'      => $invoiceId,
+                    'customFieldDoc' => getGatewayVariables('moneria_creditcard')['customFieldDoc'] ?? '',
+                ]);
+            }
+            $installments = 1;
+        } elseif (empty($cardNumber) || strlen($cardNumber) < 13) {
             echo json_encode(['success' => false, 'error' => 'Número do cartão inválido.']);
             exit;
         }
@@ -249,10 +306,7 @@ if ($action === 'process_creditcard') {
         }
 
         // Determine client IP
-        $clientIp = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'));
-        if (strpos($clientIp, ',') !== false) {
-            $clientIp = trim(explode(',', $clientIp)[0]);
-        }
+        $clientIp = MoneriaHelper::getClientIp();
 
         // Build credit card authorize payload
         $cardPayload = [
@@ -263,10 +317,13 @@ if ($action === 'process_creditcard') {
                 'number'          => $cardNumber,
                 'holderName'      => strtoupper($holderName),
                 'holderDocument'  => $holderDoc,
+                'holderEmail'     => trim($whmcsClient->email),
+                'holderPhone'     => MoneriaHelper::formatPhone($whmcsClient->phonenumber) ?? ('+55' . MoneriaHelper::onlyNumbers($whmcsClient->phonenumber)),
                 'expirationMonth' => $expMonth,
                 'expirationYear'  => $expYear < 100 ? (2000 + $expYear) : $expYear,
                 'cvv'             => $cvv,
                 'ipAddress'       => $clientIp,
+                'metadata'        => ['invoice_id' => $invoiceId],
                 'billingAddress'  => [
                     'postalCode'   => MoneriaHelper::formatCep($whmcsClient->postcode),
                     'street'       => substr($address1 ?: 'Rua Principal', 0, 100),
@@ -280,7 +337,14 @@ if ($action === 'process_creditcard') {
             ],
         ];
 
-        $authResponse = $client->authorizeCreditCard($cardPayload);
+        if ($savedCard) {
+            $tokenPayload = $cardPayload;
+            unset($tokenPayload['card']);
+            $tokenPayload['metadata'] = ['invoice_id' => $invoiceId];
+            $authResponse = $client->authorizeWithCardToken($savedCard['token'], $tokenPayload);
+        } else {
+            $authResponse = $client->authorizeCreditCard($cardPayload);
+        }
         $txStatus = strtoupper($authResponse['status'] ?? '');
         $txId = $authResponse['id'] ?? ($authResponse['transactionId'] ?? uniqid('tx_'));
 
@@ -299,6 +363,20 @@ if ($action === 'process_creditcard') {
 
             logTransaction($paymentMethodName, $authResponse, "Cartão Aprovado para Fatura #{$invoiceId}");
 
+            // The payment is already applied; failing to save the card must not fail the request.
+            if (!$savedCard && $saveCard && MoneriaHelper::isCardSavingEnabled((int)$invoice->userid)) {
+                try {
+                    $tokenCard = $cardPayload['card'];
+                    unset($tokenCard['metadata'], $tokenCard['billingAddress']['country']);
+
+                    $savedPayMethodId = MoneriaHelper::saveCardForClient((int)$invoice->userid, $client, $tokenCard);
+                    MoneriaHelper::moveClientBillingToCard((int)$invoice->userid);
+                    logTransaction('moneria_creditcard', ['invoiceid' => $invoiceId, 'paymethod_id' => $savedPayMethodId], "Cartão salvo para cobrança automática (cliente #{$invoice->userid})");
+                } catch (\Throwable $t) {
+                    logTransaction('moneria_creditcard', ['invoiceid' => $invoiceId, 'error' => $t->getMessage()], 'Falha ao salvar cartão (pagamento já aprovado)');
+                }
+            }
+
             echo json_encode(['success' => true, 'status' => $txStatus, 'transactionId' => $txId]);
             exit;
         } else {
@@ -307,13 +385,14 @@ if ($action === 'process_creditcard') {
                 $declinedMsg = implode('; ', $declinedMsg);
             }
             logTransaction('moneria', $authResponse, "Cartão Recusado para Fatura #{$invoiceId}: {$declinedMsg}");
-            echo json_encode(['success' => false, 'error' => $declinedMsg]);
+            // Raw gateway/issuer details stay in tblgatewaylog; the customer only sees a generic message.
+            echo json_encode(['success' => false, 'error' => 'Pagamento não autorizado pela operadora do cartão. Verifique os dados ou tente outro cartão.']);
             exit;
         }
 
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         logTransaction('moneria', ['invoiceid' => $invoiceId, 'error' => $e->getMessage()], 'Exceção ao Processar Cartão');
-        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        echo json_encode(['success' => false, 'error' => 'Não foi possível processar o pagamento. Tente novamente ou contate o suporte.']);
         exit;
     }
 }
@@ -336,12 +415,14 @@ if (empty($payload)) {
     exit;
 }
 
-// Always log incoming webhook payload for full debugging
-logTransaction('moneria', [
-    'raw_body' => $rawBody,
-    'parsed'   => $payload,
-    'headers'  => function_exists('getallheaders') ? getallheaders() : [],
-], 'Moneria Webhook Notification Received');
+// Full raw webhook bodies only when gateway debug is on (avoid PII in tblgatewaylog by default)
+if (!empty($gatewayParams['debug'])) {
+    logTransaction('moneria', [
+        'raw_body' => $rawBody,
+        'parsed'   => $payload,
+        'headers'  => function_exists('getallheaders') ? getallheaders() : [],
+    ], 'Moneria Webhook Notification Received');
+}
 
 $transData = $payload['data'] ?? $payload;
 
@@ -433,66 +514,95 @@ $paidStatuses = ['PAID', 'APPROVED', 'CONFIRMED', 'RECEIVED', 'COMPLETED', 'SETT
 $verifiedLive = false;
 
 if (in_array($status, $paidStatuses, true)) {
+    // Payment requires a local charge mapping for this invoice. Never pay using only a
+    // webhook-supplied chargeId + attacker-controlled ?invoiceid= / description fallbacks.
     $record = Capsule::table('mod_moneria_charges')->where('invoice_id', $invoiceId)->first();
-    $actualChargeId = !empty($record->charge_id) ? $record->charge_id : $chargeId;
+    $actualChargeId = !empty($record->charge_id) ? (string)$record->charge_id : '';
 
-    if (!empty($actualChargeId)) {
-        try {
-            $client = MoneriaHelper::createClient($gatewayParams);
-            $liveCharge = $client->getCharge($actualChargeId);
-            $liveStatus = strtoupper($liveCharge['status'] ?? '');
+    if ($actualChargeId === '') {
+        logTransaction($actualGateway, $payload, "Webhook Rejected (Security): No local charge mapping for invoice #{$invoiceId}");
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(400);
+        echo json_encode(['status' => 'rejected', 'error' => 'Missing local charge mapping']);
+        exit;
+    }
 
-            $paidTx = null;
-            if (!empty($liveCharge['invoices'][0]['transactions'])) {
-                foreach ($liveCharge['invoices'][0]['transactions'] as $txItem) {
-                    $txSt = strtoupper($txItem['status'] ?? '');
-                    if (in_array($txSt, $paidStatuses, true)) {
-                        $paidTx = $txItem;
-                        break;
-                    }
+    // Webhook chargeId, when present, must match the local mapping (no foreign charge swap).
+    if (!empty($chargeId) && !hash_equals($actualChargeId, (string)$chargeId)) {
+        logTransaction($actualGateway, [
+            'invoice_id' => $invoiceId,
+            'local_charge' => $actualChargeId,
+            'webhook_charge' => $chargeId,
+        ], "Webhook Rejected (Security): chargeId does not match local mapping for invoice #{$invoiceId}");
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(400);
+        echo json_encode(['status' => 'rejected', 'error' => 'Charge mismatch']);
+        exit;
+    }
+
+    try {
+        $client = MoneriaHelper::createClient($gatewayParams);
+        $liveCharge = $client->getCharge($actualChargeId);
+        $liveStatus = strtoupper($liveCharge['status'] ?? '');
+
+        // Bind live charge metadata to this invoice when Moneria provides it
+        $liveMetaInvoice = (int)($liveCharge['metadata']['invoice_id'] ?? ($liveCharge['metadata']['invoiceId'] ?? 0));
+        if ($liveMetaInvoice > 0 && $liveMetaInvoice !== (int)$invoiceId) {
+            logTransaction($actualGateway, [
+                'invoice_id' => $invoiceId,
+                'live_metadata_invoice' => $liveMetaInvoice,
+                'charge' => $actualChargeId,
+            ], "Webhook Rejected (Security): live charge metadata invoice mismatch");
+            header('Content-Type: application/json; charset=utf-8');
+            http_response_code(400);
+            echo json_encode(['status' => 'rejected', 'error' => 'Invoice mismatch']);
+            exit;
+        }
+
+        $paidTx = null;
+        if (!empty($liveCharge['invoices'][0]['transactions'])) {
+            foreach ($liveCharge['invoices'][0]['transactions'] as $txItem) {
+                $txSt = strtoupper($txItem['status'] ?? '');
+                if (in_array($txSt, $paidStatuses, true)) {
+                    $paidTx = $txItem;
+                    break;
                 }
             }
+        }
 
-            if ($paidTx) {
-                $transactionId = $paidTx['id'] ?? $transactionId;
-                $amount = (float)($paidTx['amount'] ?? $amount);
-                $fee = (float)($paidTx['totalFee'] ?? ($paidTx['fee'] ?? $fee));
-                $status = 'PAID';
-                $verifiedLive = true;
-            } elseif (in_array($liveStatus, $paidStatuses, true)) {
-                $status = 'PAID';
-                $verifiedLive = true;
-                $liveAmount = (float)($liveCharge['amount'] ?? ($liveCharge['total'] ?? 0));
-                if ($liveAmount > 0) {
-                    $amount = $liveAmount;
-                }
-            } else {
-                logTransaction($actualGateway, [
-                    'webhook_payload' => $payload,
-                    'live_charge' => $liveCharge,
-                ], "Webhook Rejected (Security): Charge #{$actualChargeId} status on Moneria API is '{$liveStatus}', not PAID.");
-
-                header('Content-Type: application/json; charset=utf-8');
-                http_response_code(400);
-                echo json_encode(['status' => 'rejected', 'error' => "Live charge status is {$liveStatus}"]);
-                exit;
+        if ($paidTx) {
+            $transactionId = $paidTx['id'] ?? $transactionId;
+            $amount = (float)($paidTx['amount'] ?? $amount);
+            $fee = (float)($paidTx['totalFee'] ?? ($paidTx['fee'] ?? $fee));
+            $status = 'PAID';
+            $verifiedLive = true;
+        } elseif (in_array($liveStatus, $paidStatuses, true)) {
+            $status = 'PAID';
+            $verifiedLive = true;
+            $liveAmount = (float)($liveCharge['amount'] ?? ($liveCharge['total'] ?? 0));
+            if ($liveAmount > 0) {
+                $amount = $liveAmount;
             }
-        } catch (\Throwable $t) {
+        } else {
             logTransaction($actualGateway, [
                 'webhook_payload' => $payload,
-                'exception' => $t->getMessage(),
-            ], "Webhook Verification Failed (Security): Could not verify charge #{$actualChargeId} on Moneria API");
+                'live_charge' => $liveCharge,
+            ], "Webhook Rejected (Security): Charge #{$actualChargeId} status on Moneria API is '{$liveStatus}', not PAID.");
 
             header('Content-Type: application/json; charset=utf-8');
             http_response_code(400);
-            echo json_encode(['status' => 'error', 'error' => 'Moneria API verification failed']);
+            echo json_encode(['status' => 'rejected', 'error' => "Live charge status is {$liveStatus}"]);
             exit;
         }
-    } else {
-        logTransaction($actualGateway, $payload, "Webhook Rejected (Security): No charge ID found for invoice #{$invoiceId}");
+    } catch (\Throwable $t) {
+        logTransaction($actualGateway, [
+            'webhook_payload' => $payload,
+            'exception' => $t->getMessage(),
+        ], "Webhook Verification Failed (Security): Could not verify charge #{$actualChargeId} on Moneria API");
+
         header('Content-Type: application/json; charset=utf-8');
         http_response_code(400);
-        echo json_encode(['status' => 'rejected', 'error' => 'Missing charge ID']);
+        echo json_encode(['status' => 'error', 'error' => 'Moneria API verification failed']);
         exit;
     }
 }
@@ -530,16 +640,36 @@ if (in_array($status, ['REFUNDED'], true)) {
     exit;
 }
 
-if (in_array($status, ['CANCELLED', 'FAILED', 'EXPIRED'], true)) {
-    if (!empty($chargeId)) {
-        Capsule::table('mod_moneria_charges')
-            ->where('invoice_id', $invoiceId)
-            ->update(['status' => $status, 'updated_at' => date('Y-m-d H:i:s')]);
+if (in_array($status, ['CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED'], true)) {
+    // Zero-trust: never change local state from an unauthenticated webhook. Confirm on the Moneria API first.
+    $record = Capsule::table('mod_moneria_charges')->where('invoice_id', $invoiceId)->first();
+    $actualChargeId = !empty($record->charge_id) ? $record->charge_id : $chargeId;
+    $liveStatus = '';
+
+    if (!empty($actualChargeId)) {
+        try {
+            $liveCharge = MoneriaHelper::createClient($gatewayParams)->getCharge($actualChargeId);
+            $liveStatus = strtoupper($liveCharge['status'] ?? '');
+        } catch (\Throwable $t) {
+            logTransaction($actualGateway, ['webhook_payload' => $payload, 'exception' => $t->getMessage()], "Webhook Verification Failed (Security): Could not verify charge #{$actualChargeId}");
+        }
     }
-    logTransaction($actualGateway, $payload, "Transaction status updated: {$status} for Invoice #{$invoiceId}");
+
+    if (!in_array($liveStatus, ['CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED'], true)) {
+        logTransaction($actualGateway, $payload, "Webhook Rejected (Security): status '{$status}' not confirmed on Moneria API for invoice #{$invoiceId}");
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(400);
+        echo json_encode(['status' => 'rejected', 'error' => 'Status not confirmed']);
+        exit;
+    }
+
+    Capsule::table('mod_moneria_charges')
+        ->where('invoice_id', $invoiceId)
+        ->update(['status' => $liveStatus, 'updated_at' => date('Y-m-d H:i:s')]);
+    logTransaction($actualGateway, $payload, "Transaction status updated: {$liveStatus} for Invoice #{$invoiceId}");
     header('Content-Type: application/json; charset=utf-8');
     http_response_code(200);
-    echo json_encode(['status' => 'updated', 'invoiceId' => $invoiceId, 'newStatus' => $status]);
+    echo json_encode(['status' => 'updated', 'invoiceId' => $invoiceId, 'newStatus' => $liveStatus]);
     exit;
 }
 

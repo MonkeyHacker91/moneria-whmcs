@@ -323,6 +323,55 @@ class MoneriaClient
     }
 
     /**
+     * Creates a Network Token for a credit card (POST /transactions/token).
+     * The CVV is only used during provisioning and is not stored by Moneria.
+     *
+     * @param array $card CreditCardRequest payload
+     * @return array TokenizationResponse (id, state, billingAddress)
+     * @throws Exception
+     */
+    public function tokenizeCard(array $card): array
+    {
+        $token = $this->getAccessToken();
+        $url = $this->baseUrl . '/transactions/token';
+
+        $headers = [
+            'Authorization: Bearer ' . $token,
+            'Content-Type: application/json',
+            'Accept: application/json',
+        ];
+
+        $response = $this->request('POST', $url, $card, $headers);
+
+        if (!empty($response['id'])) {
+            return $response;
+        }
+
+        $msg = $response['message'] ?? ($response['error'] ?? 'Falha ao salvar o cartão na Moneria.');
+        if (is_array($msg)) {
+            $msg = implode(' | ', $msg);
+        }
+        throw new Exception('Erro ao salvar cartão na Moneria: ' . $msg);
+    }
+
+    /**
+     * Charges a previously tokenized card (no card number / CVV needed).
+     *
+     * @param string $cardTokenId Id returned by tokenizeCard()
+     * @param array $payload Same body as authorizeCreditCard(), without the "card" key
+     * @return array
+     * @throws Exception
+     */
+    public function authorizeWithCardToken(string $cardTokenId, array $payload): array
+    {
+        // The public API spec (Oct/2026) does not document how to authorize with a token id.
+        // Confirm this field with Moneria (integracoes@moneria.com.br) before enabling auto billing.
+        $payload['cardTokenId'] = $cardTokenId;
+
+        return $this->authorizeCreditCard($payload);
+    }
+
+    /**
      * Fetches details of a single Transaction by ID.
      *
      * @param string $transactionId
@@ -371,6 +420,64 @@ class MoneriaClient
             $msg = implode(' | ', $msg);
         }
         throw new Exception('Erro no pagamento com cartão de crédito: ' . $msg);
+    }
+
+    /**
+     * Masks PAN/CVV and common PII keys before writing to tblgatewaylog.
+     *
+     * @param array $data
+     * @return array
+     */
+    private function maskSensitiveRequestData(array $data): array
+    {
+        $safeData = $data;
+        if (isset($safeData['card']['number']) && is_string($safeData['card']['number'])) {
+            $n = $safeData['card']['number'];
+            $safeData['card']['number'] = substr($n, 0, 6) . '******' . substr($n, -4);
+        }
+        if (isset($safeData['card']['cvv'])) {
+            $safeData['card']['cvv'] = '***';
+        }
+        if (isset($safeData['number']) && is_string($safeData['number'])) {
+            $n = $safeData['number'];
+            $safeData['number'] = substr($n, 0, 6) . '******' . substr($n, -4);
+        }
+        if (isset($safeData['cvv'])) {
+            $safeData['cvv'] = '***';
+        }
+        $maskKeys = ['holderDocument', 'holderEmail', 'holderPhone', 'document', 'email', 'phone', 'billingAddress', 'address'];
+        foreach ([&$safeData, &$safeData['card']] as &$scope) {
+            if (!is_array($scope)) {
+                continue;
+            }
+            foreach ($maskKeys as $mk) {
+                if (isset($scope[$mk])) {
+                    $scope[$mk] = '***';
+                }
+            }
+        }
+        unset($scope);
+        return $safeData;
+    }
+
+    /**
+     * Short, redacted preview of an API response for debug logs (no full body).
+     *
+     * @param string $raw
+     * @return string
+     */
+    private function maskSensitiveResponsePreview(string $raw): string
+    {
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return '';
+        }
+        // Strip long digit runs (card-like) and truncate
+        $redacted = preg_replace('/\b\d{12,19}\b/', '[REDACTED]', $trimmed);
+        if (strlen($redacted) > 400) {
+            return substr($redacted, 0, 400) . '…';
+        }
+        return $redacted;
     }
 
     /**
@@ -426,7 +533,11 @@ class MoneriaClient
         if ($curlErrno) {
             $err = "Erro de conexão cURL ({$curlErrno}): {$curlError}";
             if ($this->debug && function_exists('logTransaction')) {
-                logTransaction('moneria', ['url' => $url, 'method' => $method, 'data' => $data], 'cURL Error: ' . $err);
+                logTransaction('moneria', [
+                    'url' => $url,
+                    'method' => $method,
+                    'data' => $this->maskSensitiveRequestData(is_array($data) ? $data : []),
+                ], 'cURL Error: ' . $err);
             }
             throw new Exception($err);
         }
@@ -434,19 +545,13 @@ class MoneriaClient
         $decoded = json_decode($rawResponse, true);
 
         if ($this->debug && $logDebug && function_exists('logTransaction')) {
-            $safeData = $data;
-            if (isset($safeData['card']['number'])) {
-                $safeData['card']['number'] = substr($safeData['card']['number'], 0, 6) . '******' . substr($safeData['card']['number'], -4);
-            }
-            if (isset($safeData['card']['cvv'])) {
-                $safeData['card']['cvv'] = '***';
-            }
             logTransaction('moneria', [
                 'request_url' => $url,
                 'request_method' => $method,
-                'request_payload' => $safeData,
+                'request_payload' => $this->maskSensitiveRequestData(is_array($data) ? $data : []),
                 'response_code' => $httpCode,
-                'response_raw' => $rawResponse,
+                // Never store full API bodies (may echo PAN/PII); keep a short preview only
+                'response_preview' => $this->maskSensitiveResponsePreview((string)$rawResponse),
             ], "HTTP {$httpCode} - {$method} {$url}");
         }
 

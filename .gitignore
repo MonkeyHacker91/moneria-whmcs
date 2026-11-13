@@ -11,3 +11,6 @@ scratch/
 
 # Environment & Sensitive files
 *.env
+
+# Release packages
+*.zip
